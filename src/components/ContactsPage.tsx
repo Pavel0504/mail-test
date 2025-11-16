@@ -141,30 +141,36 @@ export function ContactsPage() {
       for (const contact of newContacts) {
         if (!contact.email) continue;
 
-        const { data: existingContact } = await supabase
+        const { data: existingContacts } = await supabase
           .from('contacts')
           .select('*, owner:users!contacts_owner_id_fkey(login)')
-          .eq('email', contact.email)
-          .maybeSingle();
+          .eq('email', contact.email);
 
-        if (existingContact && existingContact.owner_id !== user.id) {
+        const myContact = existingContacts?.find(c => c.owner_id === user.id);
+        const otherContact = existingContacts?.find(c => c.owner_id !== user.id);
+
+        if (myContact) {
+          continue;
+        }
+
+        if (otherContact) {
           const { error: shareError } = await supabase.from('contact_shares').insert({
-            contact_id: existingContact.id,
+            contact_id: otherContact.id,
             requester_id: user.id,
-            owner_id: existingContact.owner_id,
+            owner_id: otherContact.owner_id,
             status: 'pending',
           });
 
           if (!shareError) {
             await supabase.from('notifications').insert({
-              user_id: existingContact.owner_id,
+              user_id: otherContact.owner_id,
               type: 'contact_share_request',
               message: `Пользователь ${user.login} запросил доступ к контакту ${contact.email}`,
-              data: { contact_id: existingContact.id, requester_id: user.id },
+              data: { contact_id: otherContact.id, requester_id: user.id },
               read: false,
             });
           }
-        } else if (!existingContact) {
+        } else {
           await supabase.from('contacts').insert({
             email: contact.email,
             name: contact.name,
