@@ -68,11 +68,36 @@ export function MailingsPage() {
       loadContacts();
       loadEmails();
 
-      const interval = setInterval(() => {
-        loadMailings();
-      }, 3000);
+      const mailingsChannel = supabase
+        .channel('mailings-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'mailings',
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            loadMailings();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'mailing_recipients',
+          },
+          () => {
+            loadMailings();
+          }
+        )
+        .subscribe();
 
-      return () => clearInterval(interval);
+      return () => {
+        mailingsChannel.unsubscribe();
+      };
     }
   }, [user]);
 
