@@ -71,6 +71,13 @@ export function EmailCheckPage() {
       setContact(contactData);
 
       if (contactData) {
+        const { data: allContactsWithEmail } = await supabase
+          .from('contacts')
+          .select('id')
+          .eq('email', searchEmail);
+
+        const contactIds = allContactsWithEmail?.map(c => c.id) || [contactData.id];
+
         const { data: mailingsData } = await supabase
           .from('mailing_recipients')
           .select(`
@@ -78,13 +85,13 @@ export function EmailCheckPage() {
             mailing:mailings(subject, text_content, html_content, user_id, user:users!mailings_user_id_fkey(login)),
             sender_email:emails(email)
           `)
-          .eq('contact_id', contactData.id)
+          .in('contact_id', contactIds)
           .order('created_at', { ascending: false });
 
         const { data: historyData } = await supabase
           .from('contact_history')
           .select('*, user:users!contact_history_changed_by_fkey(login)')
-          .eq('contact_id', contactData.id)
+          .in('contact_id', contactIds)
           .order('created_at', { ascending: false });
 
         setMailings(mailingsData || []);
