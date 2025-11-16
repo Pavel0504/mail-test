@@ -95,8 +95,13 @@ export function MailingsPage() {
         )
         .subscribe();
 
+      const interval = setInterval(() => {
+        loadMailings();
+      }, 2000);
+
       return () => {
         mailingsChannel.unsubscribe();
+        clearInterval(interval);
       };
     }
   }, [user]);
