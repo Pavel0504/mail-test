@@ -71,9 +71,18 @@ export function EmailsPage() {
     setValidatingEmail(true);
     setEmailValidation(null);
     try {
-      const response = await fetch(
-        `https://rapid-email-verifier.fly.dev/api/validate?email=${encodeURIComponent(email)}`
-      );
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/validate-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${anonKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
+
       const data = await response.json();
 
       if (data.status === 'VALID' && data.validations.mailbox_exists) {
