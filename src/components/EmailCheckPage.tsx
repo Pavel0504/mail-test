@@ -16,6 +16,10 @@ interface MailingRecipient {
     subject: string;
     text_content: string | null;
     html_content: string | null;
+    user_id: string;
+    user?: {
+      login: string;
+    };
   };
   sender_email?: {
     email: string;
@@ -29,12 +33,21 @@ interface ContactHistory {
   changed_fields: Record<string, unknown>;
   changed_by: string;
   created_at: string;
+  user?: {
+    login: string;
+  };
+}
+
+interface ContactWithOwner extends Contact {
+  owner?: {
+    login: string;
+  };
 }
 
 export function EmailCheckPage() {
   const { user } = useAuth();
   const [searchEmail, setSearchEmail] = useState('');
-  const [contact, setContact] = useState<Contact | null>(null);
+  const [contact, setContact] = useState<ContactWithOwner | null>(null);
   const [mailings, setMailings] = useState<MailingRecipient[]>([]);
   const [history, setHistory] = useState<ContactHistory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +63,7 @@ export function EmailCheckPage() {
     try {
       const { data: contactData } = await supabase
         .from('contacts')
-        .select('*')
+        .select('*, owner:users!contacts_owner_id_fkey(login)')
         .eq('email', searchEmail)
         .eq('owner_id', user.id)
         .maybeSingle();
@@ -62,7 +75,7 @@ export function EmailCheckPage() {
           .from('mailing_recipients')
           .select(`
             *,
-            mailing:mailings(subject, text_content, html_content),
+            mailing:mailings(subject, text_content, html_content, user_id, user:users!mailings_user_id_fkey(login)),
             sender_email:emails(email)
           `)
           .eq('contact_id', contactData.id)
@@ -70,7 +83,7 @@ export function EmailCheckPage() {
 
         const { data: historyData } = await supabase
           .from('contact_history')
-          .select('*')
+          .select('*, user:users!contact_history_changed_by_fkey(login)')
           .eq('contact_id', contactData.id)
           .order('created_at', { ascending: false });
 
@@ -173,7 +186,7 @@ export function EmailCheckPage() {
                   <Mail className="w-5 h-5" />
                   Информация о контакте
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
                     <p className="text-gray-900 dark:text-white mt-1">{contact.email}</p>
@@ -181,6 +194,10 @@ export function EmailCheckPage() {
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Имя</label>
                     <p className="text-gray-900 dark:text-white mt-1">{contact.name || 'Не указано'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Владелец</label>
+                    <p className="text-gray-900 dark:text-white mt-1">{contact.owner?.login || 'Неизвестно'}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ссылка</label>
@@ -219,6 +236,9 @@ export function EmailCheckPage() {
                             <p className="text-sm text-gray-600 dark:text-gray-400">
                               Отправлено с: {mailing.sender_email?.email || 'Неизвестно'}
                             </p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Инициатор рассылки: {mailing.mailing?.user?.login || 'Неизвестно'}
+                            </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               {mailing.sent_at
                                 ? new Date(mailing.sent_at).toLocaleString('ru-RU')
@@ -253,7 +273,7 @@ export function EmailCheckPage() {
                         className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
                       >
                         <div className="flex items-start justify-between">
-                          <div>
+                          <div className="flex-1">
                             <p className="text-sm font-medium text-gray-900 dark:text-white">
                               {record.action_type === 'update' && 'Обновление данных'}
                               {record.action_type === 'create' && 'Создание контакта'}
@@ -263,8 +283,11 @@ export function EmailCheckPage() {
                                 Изменено: {Object.keys(record.changed_fields).join(', ')}
                               </p>
                             )}
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Пользователь: {record.user?.login || 'Неизвестно'}
+                            </p>
                           </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
                             {new Date(record.created_at).toLocaleString('ru-RU')}
                           </p>
                         </div>
