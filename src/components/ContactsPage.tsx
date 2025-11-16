@@ -10,6 +10,11 @@ interface ContactHistory {
   changed_fields: Record<string, unknown>;
   changed_by: string;
   created_at: string;
+  user?: { login: string };
+}
+
+interface ContactVersion extends Contact {
+  owner?: { login: string };
 }
 
 interface ContactShare {
@@ -35,6 +40,7 @@ export function ContactsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [contactHistory, setContactHistory] = useState<ContactHistory[]>([]);
+  const [contactVersions, setContactVersions] = useState<ContactVersion[]>([]);
   const [pendingShares, setPendingShares] = useState<ContactShare[]>([]);
 
   const [newContacts, setNewContacts] = useState([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
@@ -91,10 +97,32 @@ export function ContactsPage() {
   };
 
   const loadContactHistory = async (contactId: string) => {
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contact) return;
+
+    const { data: allContactsWithEmail } = await supabase
+      .from('contacts')
+      .select('id')
+      .eq('email', contact.email);
+
+    if (!allContactsWithEmail) return;
+
+    const contactIds = allContactsWithEmail.map(c => c.id);
+
+    const { data: versionsData } = await supabase
+      .from('contacts')
+      .select('*, owner:users!contacts_owner_id_fkey(login)')
+      .eq('email', contact.email)
+      .order('created_at', { ascending: false });
+
+    if (versionsData) {
+      setContactVersions(versionsData);
+    }
+
     const { data } = await supabase
       .from('contact_history')
-      .select('*')
-      .eq('contact_id', contactId)
+      .select('*, user:users!contact_history_changed_by_fkey(login)')
+      .in('contact_id', contactIds)
       .order('created_at', { ascending: false });
 
     if (data) {
@@ -324,6 +352,7 @@ export function ContactsPage() {
     if (expandedContact === contactId) {
       setExpandedContact(null);
       setContactHistory([]);
+      setContactVersions([]);
     } else {
       setExpandedContact(contactId);
       loadContactHistory(contactId);
@@ -459,53 +488,96 @@ export function ContactsPage() {
 
               {expandedContact === contact.id && (
                 <div className="border-t border-gray-200 dark:border-gray-700 p-5 bg-gray-50 dark:bg-gray-900/50">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-6">
                     <div>
-                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3">История изменений</h4>
-                      {contactHistory.filter((h) => h.action_type === 'update').length === 0 ? (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Нет истории изменений</p>
+                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Все версии контакта ({contactVersions.length})</h4>
+                      {contactVersions.length === 0 ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Загрузка...</p>
                       ) : (
                         <div className="space-y-2">
-                          {contactHistory
-                            .filter((h) => h.action_type === 'update')
-                            .map((history) => (
-                              <div
-                                key={history.id}
-                                className="text-sm bg-white dark:bg-gray-800 p-3 rounded-lg"
-                              >
-                                <p className="text-gray-900 dark:text-white font-medium mb-1">
-                                  Изменения: {Object.keys(history.changed_fields).join(', ')}
-                                </p>
-                                <p className="text-gray-500 dark:text-gray-400 text-xs">
-                                  {new Date(history.created_at).toLocaleString('ru-RU')}
-                                </p>
+                          {contactVersions.map((version, index) => (
+                            <div
+                              key={version.id}
+                              className="text-sm bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-600"
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <p className="text-gray-900 dark:text-white font-medium">
+                                    Владелец: {version.owner?.login || 'Неизвестно'}
+                                  </p>
+                                  <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">
+                                    Имя: {version.name || 'Не указано'}
+                                  </p>
+                                  <p className="text-gray-600 dark:text-gray-400 text-xs">
+                                    Ссылка: {version.link || 'Не указана'}
+                                  </p>
+                                  <p className="text-gray-500 dark:text-gray-400 text-xs mt-1">
+                                    Создан: {new Date(version.created_at).toLocaleString('ru-RU')}
+                                  </p>
+                                  {version.updated_at && version.updated_at !== version.created_at && (
+                                    <p className="text-gray-500 dark:text-gray-400 text-xs">
+                                      Обновлен: {new Date(version.updated_at).toLocaleString('ru-RU')}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
-                            ))}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
 
-                    <div>
-                      <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Почта по умолчанию</h4>
-                      <select
-                        value={contact.default_sender_email_id || ''}
-                        onChange={async (e) => {
-                          const emailId = e.target.value || null;
-                          await supabase
-                            .from('contacts')
-                            .update({ default_sender_email_id: emailId })
-                            .eq('id', contact.id);
-                          loadContacts();
-                        }}
-                        className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                      >
-                        <option value="">Не выбрано</option>
-                        {emails.map((email) => (
-                          <option key={email.id} value={email.id}>
-                            {email.email}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div>
+                        <h4 className="font-semibold text-gray-900 dark:text-white mb-3">История изменений ({contactHistory.filter((h) => h.action_type === 'update').length})</h4>
+                        {contactHistory.filter((h) => h.action_type === 'update').length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">Нет истории изменений</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {contactHistory
+                              .filter((h) => h.action_type === 'update')
+                              .map((history) => (
+                                <div
+                                  key={history.id}
+                                  className="text-sm bg-white dark:bg-gray-800 p-3 rounded-lg"
+                                >
+                                  <p className="text-gray-900 dark:text-white font-medium mb-1">
+                                    Изменения: {Object.keys(history.changed_fields).join(', ')}
+                                  </p>
+                                  <p className="text-gray-600 dark:text-gray-400 text-xs">
+                                    Пользователь: {history.user?.login || 'Неизвестно'}
+                                  </p>
+                                  <p className="text-gray-500 dark:text-gray-400 text-xs">
+                                    {new Date(history.created_at).toLocaleString('ru-RU')}
+                                  </p>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Почта по умолчанию</h4>
+                        <select
+                          value={contact.default_sender_email_id || ''}
+                          onChange={async (e) => {
+                            const emailId = e.target.value || null;
+                            await supabase
+                              .from('contacts')
+                              .update({ default_sender_email_id: emailId })
+                              .eq('id', contact.id);
+                            loadContacts();
+                          }}
+                          className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                        >
+                          <option value="">Не выбрано</option>
+                          {emails.map((email) => (
+                            <option key={email.id} value={email.id}>
+                              {email.email}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
