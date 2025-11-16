@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Mail, CheckCircle, XCircle, Clock, History } from 'lucide-react';
+import { Search, Mail, CheckCircle, XCircle, Clock, History, Share2 } from 'lucide-react';
 import { supabase, Contact } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -38,6 +38,21 @@ interface ContactHistory {
   };
 }
 
+interface ContactShare {
+  id: string;
+  contact_id: string;
+  requester_id: string;
+  owner_id: string;
+  status: string;
+  created_at: string;
+  requester?: {
+    login: string;
+  };
+  owner?: {
+    login: string;
+  };
+}
+
 interface ContactWithOwner extends Contact {
   owner?: {
     login: string;
@@ -48,8 +63,10 @@ export function EmailCheckPage() {
   const { user } = useAuth();
   const [searchEmail, setSearchEmail] = useState('');
   const [contact, setContact] = useState<ContactWithOwner | null>(null);
+  const [allContactVersions, setAllContactVersions] = useState<ContactWithOwner[]>([]);
   const [mailings, setMailings] = useState<MailingRecipient[]>([]);
   const [history, setHistory] = useState<ContactHistory[]>([]);
+  const [shareHistory, setShareHistory] = useState<ContactShare[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
@@ -71,12 +88,15 @@ export function EmailCheckPage() {
       setContact(contactData);
 
       if (contactData) {
-        const { data: allContactsWithEmail } = await supabase
+        const { data: allVersions } = await supabase
           .from('contacts')
-          .select('id')
-          .eq('email', searchEmail);
+          .select('*, owner:users!contacts_owner_id_fkey(login)')
+          .eq('email', searchEmail)
+          .order('created_at', { ascending: false });
 
-        const contactIds = allContactsWithEmail?.map(c => c.id) || [contactData.id];
+        setAllContactVersions(allVersions || []);
+
+        const contactIds = allVersions?.map(c => c.id) || [contactData.id];
 
         const { data: mailingsData } = await supabase
           .from('mailing_recipients')
@@ -94,11 +114,24 @@ export function EmailCheckPage() {
           .in('contact_id', contactIds)
           .order('created_at', { ascending: false });
 
+        const { data: shareData } = await supabase
+          .from('contact_shares')
+          .select(`
+            *,
+            requester:users!contact_shares_requester_id_fkey(login),
+            owner:users!contact_shares_owner_id_fkey(login)
+          `)
+          .in('contact_id', contactIds)
+          .order('created_at', { ascending: false });
+
         setMailings(mailingsData || []);
         setHistory(historyData || []);
+        setShareHistory(shareData || []);
       } else {
+        setAllContactVersions([]);
         setMailings([]);
         setHistory([]);
+        setShareHistory([]);
       }
     } catch (error) {
       console.error('Error searching email:', error);
@@ -193,31 +226,79 @@ export function EmailCheckPage() {
                   <Mail className="w-5 h-5" />
                   Информация о контакте
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
-                    <p className="text-gray-900 dark:text-white mt-1">{contact.email}</p>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Email</label>
+                      <p className="text-gray-900 dark:text-white mt-1">{contact.email}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Имя</label>
+                      <p className="text-gray-900 dark:text-white mt-1">{contact.name || 'Не указано'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Владелец</label>
+                      <p className="text-gray-900 dark:text-white mt-1">{contact.owner?.login || 'Неизвестно'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ссылка</label>
+                      <p className="text-gray-900 dark:text-white mt-1">
+                        {contact.link ? (
+                          <a href={contact.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
+                            Открыть
+                          </a>
+                        ) : (
+                          'Не указана'
+                        )}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Имя</label>
-                    <p className="text-gray-900 dark:text-white mt-1">{contact.name || 'Не указано'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Владелец</label>
-                    <p className="text-gray-900 dark:text-white mt-1">{contact.owner?.login || 'Неизвестно'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Ссылка</label>
-                    <p className="text-gray-900 dark:text-white mt-1">
-                      {contact.link ? (
-                        <a href={contact.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
-                          Открыть
-                        </a>
-                      ) : (
-                        'Не указана'
-                      )}
-                    </p>
-                  </div>
+
+                  {allContactVersions.length > 1 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                        Остальные версии контакта ({allContactVersions.length - 1})
+                      </h3>
+                      <div className="space-y-3">
+                        {allContactVersions.filter(v => v.id !== contact.id).map((version) => (
+                          <div
+                            key={version.id}
+                            className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                              <div>
+                                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Email</label>
+                                <p className="text-sm text-gray-900 dark:text-white mt-0.5">{version.email}</p>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Имя</label>
+                                <p className="text-sm text-gray-900 dark:text-white mt-0.5">{version.name || 'Не указано'}</p>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Владелец</label>
+                                <p className="text-sm text-gray-900 dark:text-white mt-0.5">{version.owner?.login || 'Неизвестно'}</p>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Ссылка</label>
+                                <p className="text-sm text-gray-900 dark:text-white mt-0.5">
+                                  {version.link ? (
+                                    <a href={version.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">
+                                      Открыть
+                                    </a>
+                                  ) : (
+                                    'Не указана'
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                              Создан: {new Date(version.created_at).toLocaleString('ru-RU')}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -268,38 +349,65 @@ export function EmailCheckPage() {
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                   <History className="w-5 h-5" />
-                  История изменений ({history.length})
+                  История изменений и шаринга ({history.length + shareHistory.length})
                 </h2>
-                {history.length === 0 ? (
+                {history.length === 0 && shareHistory.length === 0 ? (
                   <p className="text-gray-500 dark:text-gray-400">Нет истории изменений</p>
                 ) : (
                   <div className="space-y-2">
-                    {history.map((record) => (
-                      <div
-                        key={record.id}
-                        className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">
-                              {record.action_type === 'update' && 'Обновление данных'}
-                              {record.action_type === 'create' && 'Создание контакта'}
-                            </p>
-                            {Object.keys(record.changed_fields).length > 0 && (
-                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                Изменено: {Object.keys(record.changed_fields).join(', ')}
-                              </p>
-                            )}
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              Пользователь: {record.user?.login || 'Неизвестно'}
+                    {[...shareHistory.map(s => ({ type: 'share' as const, data: s, created_at: s.created_at })),
+                      ...history.map(h => ({ type: 'history' as const, data: h, created_at: h.created_at }))]
+                      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                      .map((item, index) => (
+                        <div
+                          key={`${item.type}-${index}`}
+                          className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              {item.type === 'share' && (
+                                <>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Share2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                      Шаринг контакта
+                                    </p>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    {item.data.requester?.login} запросил доступ у {item.data.owner?.login}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Статус: {
+                                      item.data.status === 'approved' ? 'Одобрено' :
+                                      item.data.status === 'pending' ? 'Ожидание' :
+                                      item.data.status === 'rejected' ? 'Отклонено' : item.data.status
+                                    }
+                                  </p>
+                                </>
+                              )}
+                              {item.type === 'history' && (
+                                <>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {item.data.action_type === 'update' && 'Обновление данных'}
+                                    {item.data.action_type === 'create' && 'Создание контакта'}
+                                  </p>
+                                  {Object.keys(item.data.changed_fields).length > 0 && (
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                      Изменено: {Object.keys(item.data.changed_fields).join(', ')}
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    Пользователь: {item.data.user?.login || 'Неизвестно'}
+                                  </p>
+                                </>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
+                              {new Date(item.created_at).toLocaleString('ru-RU')}
                             </p>
                           </div>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
-                            {new Date(record.created_at).toLocaleString('ru-RU')}
-                          </p>
                         </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 )}
               </div>
