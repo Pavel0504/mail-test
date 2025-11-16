@@ -37,7 +37,7 @@ export function ContactsPage() {
   const [contactHistory, setContactHistory] = useState<ContactHistory[]>([]);
   const [pendingShares, setPendingShares] = useState<ContactShare[]>([]);
 
-  const [newContacts, setNewContacts] = useState([{ email: '', name: '', link: '' }]);
+  const [newContacts, setNewContacts] = useState([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
   const [editForm, setEditForm] = useState({ email: '', name: '', link: '', default_sender_email_id: '' });
 
   useEffect(() => {
@@ -139,9 +139,10 @@ export function ContactsPage() {
         } else if (!existingContact) {
           await supabase.from('contacts').insert({
             email: contact.email,
-            name: contact.name || '',
-            link: contact.link || '',
+            name: contact.name,
+            link: contact.link,
             owner_id: user.id,
+            default_sender_email_id: contact.default_sender_email_id || null,
             has_changes: false,
           });
 
@@ -155,7 +156,7 @@ export function ContactsPage() {
         }
       }
 
-      setNewContacts([{ email: '', name: '', link: '' }]);
+      setNewContacts([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
       setShowAddModal(false);
       loadContacts();
     } catch (err) {
@@ -542,7 +543,7 @@ export function ContactsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Email
+                      Email <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="email"
@@ -559,7 +560,7 @@ export function ContactsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Имя
+                      Имя <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="text"
@@ -571,11 +572,12 @@ export function ContactsPage() {
                       }}
                       className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
                       placeholder="Имя контакта"
+                      required
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Ссылка
+                      Ссылка <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="url"
@@ -587,14 +589,36 @@ export function ContactsPage() {
                       }}
                       className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
                       placeholder="https://example.com"
+                      required
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Почта по умолчанию
+                    </label>
+                    <select
+                      value={contact.default_sender_email_id}
+                      onChange={(e) => {
+                        const updated = [...newContacts];
+                        updated[index].default_sender_email_id = e.target.value;
+                        setNewContacts(updated);
+                      }}
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                    >
+                      <option value="">Не выбрано</option>
+                      {emails.map((email) => (
+                        <option key={email.id} value={email.id}>
+                          {email.email}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               ))}
 
               <button
                 type="button"
-                onClick={() => setNewContacts([...newContacts, { email: '', name: '', link: '' }])}
+                onClick={() => setNewContacts([...newContacts, { email: '', name: '', link: '', default_sender_email_id: '' }])}
                 className="w-full px-4 py-2 border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 + Добавить еще контакт
@@ -605,7 +629,7 @@ export function ContactsPage() {
                   type="button"
                   onClick={() => {
                     setShowAddModal(false);
-                    setNewContacts([{ email: '', name: '', link: '' }]);
+                    setNewContacts([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
                     setError('');
                   }}
                   className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
