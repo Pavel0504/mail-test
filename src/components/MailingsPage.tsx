@@ -67,6 +67,12 @@ export function MailingsPage() {
       loadMailings();
       loadContacts();
       loadEmails();
+
+      const interval = setInterval(() => {
+        loadMailings();
+      }, 3000);
+
+      return () => clearInterval(interval);
     }
   }, [user]);
 

@@ -53,31 +53,42 @@ Deno.serve(async (req: Request) => {
     const smtpUser = sender_email.email;
     const smtpPass = sender_email.password;
 
-    const boundary = "----=_Part_" + Date.now();
     let emailBody = "";
 
     emailBody += `From: ${smtpUser}\r\n`;
     emailBody += `To: ${contact.email}\r\n`;
     emailBody += `Subject: ${mailing.subject}\r\n`;
     emailBody += `MIME-Version: 1.0\r\n`;
-    emailBody += `Content-Type: multipart/alternative; boundary="${boundary}"\r\n`;
-    emailBody += `\r\n`;
 
-    if (mailing.text_content) {
+    const hasText = !!mailing.text_content;
+    const hasHtml = !!mailing.html_content;
+
+    if (hasText && hasHtml) {
+      const boundary = "----=_Part_" + Date.now();
+      emailBody += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n`;
+      emailBody += `\r\n`;
+
       emailBody += `--${boundary}\r\n`;
       emailBody += `Content-Type: text/plain; charset=UTF-8\r\n`;
       emailBody += `\r\n`;
       emailBody += `${mailing.text_content}\r\n`;
-    }
+      emailBody += `\r\n`;
 
-    if (mailing.html_content) {
       emailBody += `--${boundary}\r\n`;
       emailBody += `Content-Type: text/html; charset=UTF-8\r\n`;
       emailBody += `\r\n`;
       emailBody += `${mailing.html_content}\r\n`;
-    }
 
-    emailBody += `--${boundary}--\r\n`;
+      emailBody += `--${boundary}--\r\n`;
+    } else if (hasText) {
+      emailBody += `Content-Type: text/plain; charset=UTF-8\r\n`;
+      emailBody += `\r\n`;
+      emailBody += `${mailing.text_content}\r\n`;
+    } else if (hasHtml) {
+      emailBody += `Content-Type: text/html; charset=UTF-8\r\n`;
+      emailBody += `\r\n`;
+      emailBody += `${mailing.html_content}\r\n`;
+    }
 
     const conn = await Deno.connect({
       hostname: smtpHost,
@@ -196,6 +207,34 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
+    const allRecipientsRes = await fetch(
+      `${supabaseUrl}/rest/v1/mailing_recipients?mailing_id=eq.${mailing.id}&select=status`,
+      {
+        headers: {
+          "apikey": supabaseServiceKey,
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+      }
+    );
+    const allRecipients = await allRecipientsRes.json();
+    const allProcessed = allRecipients.every((r: { status: string }) => r.status !== "pending");
+
+    if (allProcessed) {
+      const hasFailures = allRecipients.some((r: { status: string }) => r.status === "failed");
+      const finalStatus = hasFailures ? "completed" : "completed";
+
+      await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": supabaseServiceKey,
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal",
+        },
+        body: JSON.stringify({ status: finalStatus }),
+      });
+    }
+
     return new Response(
       JSON.stringify({ success: true, message: "Email sent successfully" }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -203,11 +242,24 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-    if (req.body) {
-      try {
-        const { recipient_id } = await req.json() as SendEmailRequest;
-        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+      const body = await req.text();
+      const { recipient_id } = JSON.parse(body) as SendEmailRequest;
+
+      const recipientRes = await fetch(`${supabaseUrl}/rest/v1/mailing_recipients?id=eq.${recipient_id}&select=*,mailing:mailings(*),sender_email:emails(*)`, {
+        headers: {
+          "apikey": supabaseServiceKey,
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+      });
+
+      const recipients = await recipientRes.json();
+      if (recipients && recipients.length > 0) {
+        const recipient = recipients[0];
+        const { mailing, sender_email } = recipient;
 
         await fetch(`${supabaseUrl}/rest/v1/mailing_recipients?id=eq.${recipient_id}`, {
           method: "PATCH",
@@ -222,9 +274,71 @@ Deno.serve(async (req: Request) => {
             error_message: errorMessage,
           }),
         });
-      } catch (e) {
-        console.error("Failed to update recipient status:", e);
+
+        await fetch(`${supabaseUrl}/rest/v1/emails?id=eq.${sender_email.id}`, {
+          method: "PATCH",
+          headers: {
+            "apikey": supabaseServiceKey,
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({
+            sent_count: sender_email.sent_count + 1,
+            failed_count: sender_email.failed_count + 1,
+          }),
+        });
+
+        const mailingRes = await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}&select=sent_count,failed_count`, {
+          headers: {
+            "apikey": supabaseServiceKey,
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+          },
+        });
+        const mailings = await mailingRes.json();
+        const currentMailing = mailings[0];
+
+        await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
+          method: "PATCH",
+          headers: {
+            "apikey": supabaseServiceKey,
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+          },
+          body: JSON.stringify({
+            sent_count: currentMailing.sent_count + 1,
+            failed_count: currentMailing.failed_count + 1,
+          }),
+        });
+
+        const allRecipientsRes = await fetch(
+          `${supabaseUrl}/rest/v1/mailing_recipients?mailing_id=eq.${mailing.id}&select=status`,
+          {
+            headers: {
+              "apikey": supabaseServiceKey,
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+            },
+          }
+        );
+        const allRecipients = await allRecipientsRes.json();
+        const allProcessed = allRecipients.every((r: { status: string }) => r.status !== "pending");
+
+        if (allProcessed) {
+          await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
+            method: "PATCH",
+            headers: {
+              "apikey": supabaseServiceKey,
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+              "Content-Type": "application/json",
+              "Prefer": "return=minimal",
+            },
+            body: JSON.stringify({ status: "completed" }),
+          });
+        }
       }
+    } catch (e) {
+      console.error("Failed to update recipient status:", e);
     }
 
     return new Response(
