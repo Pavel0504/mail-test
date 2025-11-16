@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Send, Plus, Trash2, Eye, X, CheckCircle, XCircle, Clock, Upload } from 'lucide-react';
+import { Send, Plus, Trash2, Eye, X, CheckCircle, XCircle, Clock, Upload, Edit2 } from 'lucide-react';
 import { supabase, Mailing, Contact, Email } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -43,8 +43,10 @@ export function MailingsPage() {
   const [emails, setEmails] = useState<Email[]>([]);
   const [selectedMailing, setSelectedMailing] = useState<MailingWithRecipients | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [mailingToEdit, setMailingToEdit] = useState<MailingWithRecipients | null>(null);
   const [mailingToDelete, setMailingToDelete] = useState<Mailing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -280,6 +282,98 @@ export function MailingsPage() {
     }
   };
 
+  const handleEditMailing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !mailingToEdit) return;
+
+    if (!newMailing.text_content && !newMailing.html_content) {
+      setError('Необходимо заполнить хотя бы одно из полей: текст или HTML');
+      return;
+    }
+
+    if (newMailing.selected_contacts.length === 0) {
+      setError('Выберите хотя бы одного получателя');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      let scheduledAt = null;
+      if (!newMailing.send_now && newMailing.scheduled_at && newMailing.scheduled_time) {
+        const dateTime = `${newMailing.scheduled_at}T${newMailing.scheduled_time}:00`;
+        scheduledAt = new Date(dateTime).toISOString();
+      }
+
+      await supabase
+        .from('mailings')
+        .update({
+          subject: newMailing.subject,
+          text_content: newMailing.text_content || null,
+          html_content: newMailing.html_content || null,
+          scheduled_at: scheduledAt,
+          timezone: newMailing.timezone,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', mailingToEdit.id);
+
+      await supabase.from('mailing_recipients').delete().eq('mailing_id', mailingToEdit.id);
+
+      const finalContacts = newMailing.selected_contacts.filter(
+        (id) => !newMailing.exclude_contacts.includes(id)
+      );
+
+      const recipients = finalContacts.map((contactId) => {
+        const contact = contacts.find((c) => c.id === contactId);
+        const senderEmailId = contact?.default_sender_email_id || emails[0]?.id || null;
+
+        return {
+          mailing_id: mailingToEdit.id,
+          contact_id: contactId,
+          sender_email_id: senderEmailId,
+          status: 'pending',
+          sent_at: null,
+          error_message: null,
+        };
+      });
+
+      if (recipients.length > 0) {
+        await supabase.from('mailing_recipients').insert(recipients);
+      }
+
+      await supabase.from('activity_logs').insert({
+        user_id: user.id,
+        action_type: 'update',
+        entity_type: 'mailing',
+        entity_id: mailingToEdit.id,
+        details: {
+          subject: newMailing.subject,
+          recipients_count: recipients.length,
+        },
+      });
+
+      setNewMailing({
+        subject: '',
+        text_content: '',
+        html_content: '',
+        scheduled_at: '',
+        scheduled_time: '',
+        timezone: 'UTC',
+        selected_contacts: [],
+        exclude_contacts: [],
+        send_now: false,
+      });
+      setShowEditModal(false);
+      setMailingToEdit(null);
+      loadMailings();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка при редактировании рассылки');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDeleteMailing = async () => {
     if (!mailingToDelete) return;
 
@@ -309,6 +403,34 @@ export function MailingsPage() {
   const handleViewMailing = async (mailing: MailingWithRecipients) => {
     setSelectedMailing(mailing);
     setShowViewModal(true);
+  };
+
+  const openEditModal = (mailing: MailingWithRecipients) => {
+    setMailingToEdit(mailing);
+
+    const scheduledDate = mailing.scheduled_at ? new Date(mailing.scheduled_at) : null;
+    const scheduled_at = scheduledDate
+      ? scheduledDate.toISOString().split('T')[0]
+      : '';
+    const scheduled_time = scheduledDate
+      ? scheduledDate.toISOString().split('T')[1].substring(0, 5)
+      : '';
+
+    const recipientContactIds = mailing.recipients?.map((r) => r.contact_id) || [];
+
+    setNewMailing({
+      subject: mailing.subject,
+      text_content: mailing.text_content || '',
+      html_content: mailing.html_content || '',
+      scheduled_at,
+      scheduled_time,
+      timezone: mailing.timezone,
+      selected_contacts: recipientContactIds,
+      exclude_contacts: [],
+      send_now: false,
+    });
+
+    setShowEditModal(true);
   };
 
   const handleSendNow = async (mailingId: string) => {
@@ -512,14 +634,23 @@ export function MailingsPage() {
                         <Eye className="w-5 h-5" />
                       </button>
                       {mailing.status === 'pending' && (
-                        <button
-                          onClick={() => handleSendNow(mailing.id)}
-                          disabled={loading}
-                          className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors disabled:opacity-50"
-                          title="Отправить сейчас"
-                        >
-                          <Send className="w-5 h-5" />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => openEditModal(mailing)}
+                            className="p-2 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
+                            title="Редактировать"
+                          >
+                            <Edit2 className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => handleSendNow(mailing.id)}
+                            disabled={loading}
+                            className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors disabled:opacity-50"
+                            title="Отправить сейчас"
+                          >
+                            <Send className="w-5 h-5" />
+                          </button>
+                        </>
                       )}
                       {(mailing.status === 'pending' || mailing.status === 'failed') && (
                         <button
@@ -760,6 +891,217 @@ export function MailingsPage() {
                   className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
                 >
                   {loading ? 'Создание...' : 'Создать'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && mailingToEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Редактировать рассылку</h2>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleEditMailing} className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Тема письма
+                </label>
+                <input
+                  type="text"
+                  value={newMailing.subject}
+                  onChange={(e) => setNewMailing({ ...newMailing, subject: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  placeholder="Введите тему письма"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Текст письма
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded cursor-pointer transition-colors">
+                      <Upload className="w-3 h-3" />
+                      Загрузить .txt
+                      <input
+                        type="file"
+                        accept=".txt"
+                        onChange={handleLoadTextFile}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <textarea
+                    value={newMailing.text_content}
+                    onChange={(e) => setNewMailing({ ...newMailing, text_content: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                    placeholder="Введите текст письма"
+                    rows={8}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      HTML письма
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded cursor-pointer transition-colors">
+                      <Upload className="w-3 h-3" />
+                      Загрузить .html
+                      <input
+                        type="file"
+                        accept=".html"
+                        onChange={handleLoadHtmlFile}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  <textarea
+                    value={newMailing.html_content}
+                    onChange={(e) => setNewMailing({ ...newMailing, html_content: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                    placeholder="Введите HTML код"
+                    rows={8}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Выбор получателей
+                </label>
+                <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-700">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newMailing.selected_contacts.length === contacts.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewMailing({
+                              ...newMailing,
+                              selected_contacts: contacts.map((c) => c.id),
+                            });
+                          } else {
+                            setNewMailing({ ...newMailing, selected_contacts: [] });
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        Выбрать всех
+                      </span>
+                    </label>
+                    <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
+                    {contacts.map((contact) => (
+                      <label key={contact.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={newMailing.selected_contacts.includes(contact.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewMailing({
+                                ...newMailing,
+                                selected_contacts: [...newMailing.selected_contacts, contact.id],
+                              });
+                            } else {
+                              setNewMailing({
+                                ...newMailing,
+                                selected_contacts: newMailing.selected_contacts.filter((id) => id !== contact.id),
+                              });
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          {contact.email} {contact.name && `(${contact.name})`}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Дата
+                  </label>
+                  <input
+                    type="date"
+                    value={newMailing.scheduled_at}
+                    onChange={(e) => setNewMailing({ ...newMailing, scheduled_at: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Время
+                  </label>
+                  <input
+                    type="time"
+                    value={newMailing.scheduled_time}
+                    onChange={(e) => setNewMailing({ ...newMailing, scheduled_time: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Часовой пояс
+                  </label>
+                  <select
+                    value={newMailing.timezone}
+                    onChange={(e) => setNewMailing({ ...newMailing, timezone: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.iana} value={tz.iana}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setMailingToEdit(null);
+                    setNewMailing({
+                      subject: '',
+                      text_content: '',
+                      html_content: '',
+                      scheduled_at: '',
+                      scheduled_time: '',
+                      timezone: 'UTC',
+                      selected_contacts: [],
+                      exclude_contacts: [],
+                      send_now: false,
+                    });
+                    setError('');
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Отменить
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+                >
+                  {loading ? 'Сохранение...' : 'Сохранить'}
                 </button>
               </div>
             </form>
