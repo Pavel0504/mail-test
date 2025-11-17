@@ -5,7 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
 import { EmailsPage } from './components/EmailsPage';
-import { ContactsPage } from './components/ContactsPage';
+import { ContactsWrapper } from './components/ContactsWrapper';
 import { EmailCheckPage } from './components/EmailCheckPage';
 import { SettingsPage } from './components/SettingsPage';
 import { MailingsPage } from './components/MailingsPage';
@@ -63,7 +63,7 @@ function MainApp() {
       case 'emails':
         return <EmailsPage />;
       case 'contacts':
-        return <ContactsPage />;
+        return <ContactsWrapper />;
       case 'check':
         return <EmailCheckPage />;
       case 'mailings':

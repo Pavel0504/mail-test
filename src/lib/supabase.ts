@@ -75,3 +75,21 @@ export interface ActivityLog {
   details: Record<string, unknown>;
   created_at: string;
 }
+
+export interface ContactGroup {
+  id: string;
+  name: string;
+  user_id: string;
+  default_subject: string | null;
+  default_text_content: string | null;
+  default_html_content: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactGroupMember {
+  id: string;
+  group_id: string;
+  contact_id: string;
+  created_at: string;
+}
