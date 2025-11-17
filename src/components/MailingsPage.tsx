@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Send, Plus, Trash2, Eye, X, CheckCircle, XCircle, Clock, Upload, Edit2, FolderOpen } from 'lucide-react';
+import { Send, Plus, Trash2, Eye, X, CheckCircle, XCircle, Clock, Upload, Edit2, FolderOpen, ChevronDown } from 'lucide-react';
 import { supabase, Mailing, Contact, Email, ContactGroup } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -52,6 +52,7 @@ export function MailingsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'failed'>('pending');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [newMailing, setNewMailing] = useState({
     subject: '',
@@ -185,11 +186,6 @@ export function MailingsPage() {
   const handleCreateMailing = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-
-    if (!newMailing.text_content && !newMailing.html_content) {
-      setError('Необходимо заполнить хотя бы одно из полей: текст или HTML');
-      return;
-    }
 
     if (newMailing.selected_contacts.length === 0 && newMailing.selected_groups.length === 0) {
       setError('Выберите хотя бы одного получателя или группу');
@@ -342,11 +338,6 @@ export function MailingsPage() {
   const handleEditMailing = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !mailingToEdit) return;
-
-    if (!newMailing.text_content && !newMailing.html_content) {
-      setError('Необходимо заполнить хотя бы одно из полей: текст или HTML');
-      return;
-    }
 
     if (newMailing.selected_contacts.length === 0 && newMailing.selected_groups.length === 0) {
       setError('Выберите хотя бы одного получателя или группу');
@@ -825,81 +816,48 @@ export function MailingsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Выбор контактов
-                  </label>
-                  <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-700">
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={newMailing.selected_contacts.length === contacts.length}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewMailing({
-                                ...newMailing,
-                                selected_contacts: contacts.map((c) => c.id),
-                              });
-                            } else {
-                              setNewMailing({ ...newMailing, selected_contacts: [] });
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
-                          Выбрать всех
-                        </span>
-                      </label>
-                      <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
-                      {contacts.map((contact) => (
-                        <label key={contact.id} className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={newMailing.selected_contacts.includes(contact.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setNewMailing({
-                                  ...newMailing,
-                                  selected_contacts: [...newMailing.selected_contacts, contact.id],
-                                });
-                              } else {
-                                setNewMailing({
-                                  ...newMailing,
-                                  selected_contacts: newMailing.selected_contacts.filter((id) => id !== contact.id),
-                                });
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-gray-700 dark:text-gray-300">
-                            {contact.email} {contact.name && `(${contact.name})`}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <div className="flex items-center gap-2">
+                    <FolderOpen className="w-4 h-4" />
+                    Выбор групп
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    <div className="flex items-center gap-2">
-                      <FolderOpen className="w-4 h-4" />
-                      Выбор групп
-                    </div>
-                  </label>
-                  <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-700">
-                    {groups.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Нет созданных групп</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {groups.map((group) => (
-                          <label key={group.id} className="flex items-start gap-2">
+                </label>
+                {groups.length === 0 ? (
+                  <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 bg-gray-50 dark:bg-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Нет созданных групп</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {groups.map((group) => {
+                      const isExpanded = expandedGroups.has(group.id);
+                      const isSelected = newMailing.selected_groups.includes(group.id);
+                      return (
+                        <div
+                          key={group.id}
+                          className={`border rounded-lg transition-colors ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                              : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800'
+                          }`}
+                        >
+                          <div
+                            className="p-4 cursor-pointer flex items-start gap-3"
+                            onClick={() => {
+                              const newExpanded = new Set(expandedGroups);
+                              if (isExpanded) {
+                                newExpanded.delete(group.id);
+                              } else {
+                                newExpanded.add(group.id);
+                              }
+                              setExpandedGroups(newExpanded);
+                            }}
+                          >
                             <input
                               type="checkbox"
-                              checked={newMailing.selected_groups.includes(group.id)}
+                              checked={isSelected}
                               onChange={(e) => {
+                                e.stopPropagation();
                                 if (e.target.checked) {
                                   setNewMailing({
                                     ...newMailing,
@@ -912,22 +870,116 @@ export function MailingsPage() {
                                   });
                                 }
                               }}
+                              onClick={(e) => e.stopPropagation()}
                               className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 mt-0.5"
                             />
                             <div className="flex-1">
-                              <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
-                                {group.name}
-                              </span>
-                              {group.default_subject && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {group.name}
+                                </span>
+                                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                              {group.default_subject && !isExpanded && (
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                   Тема: {group.default_subject}
                                 </p>
                               )}
                             </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
+                          </div>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 space-y-3 border-t border-gray-200 dark:border-gray-600 pt-3">
+                              {group.default_subject && (
+                                <div>
+                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    Тема по умолчанию:
+                                  </p>
+                                  <p className="text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded">
+                                    {group.default_subject}
+                                  </p>
+                                </div>
+                              )}
+                              {group.default_text_content && (
+                                <div>
+                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    Текст по умолчанию:
+                                  </p>
+                                  <pre className="text-xs text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
+                                    {group.default_text_content}
+                                  </pre>
+                                </div>
+                              )}
+                              {group.default_html_content && (
+                                <div>
+                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    HTML по умолчанию:
+                                  </p>
+                                  <pre className="text-xs text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
+                                    {group.default_html_content}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Выбор контактов
+                </label>
+                <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-700">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newMailing.selected_contacts.length === contacts.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewMailing({
+                              ...newMailing,
+                              selected_contacts: contacts.map((c) => c.id),
+                            });
+                          } else {
+                            setNewMailing({ ...newMailing, selected_contacts: [] });
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        Выбрать всех
+                      </span>
+                    </label>
+                    <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
+                    {contacts.map((contact) => (
+                      <label key={contact.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={newMailing.selected_contacts.includes(contact.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewMailing({
+                                ...newMailing,
+                                selected_contacts: [...newMailing.selected_contacts, contact.id],
+                              });
+                            } else {
+                              setNewMailing({
+                                ...newMailing,
+                                selected_contacts: newMailing.selected_contacts.filter((id) => id !== contact.id),
+                              });
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          {contact.email} {contact.name && `(${contact.name})`}
+                        </span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               </div>
