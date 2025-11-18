@@ -80,9 +80,11 @@ export interface ContactGroup {
   id: string;
   name: string;
   user_id: string;
+  parent_group_id: string | null;
   default_subject: string | null;
   default_text_content: string | null;
   default_html_content: string | null;
+  default_sender_email_id: string | null;
   created_at: string;
   updated_at: string;
 }
