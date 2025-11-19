@@ -1,11 +1,10 @@
 import { useState } from 'react';
-import { Users, FolderOpen, FolderTree } from 'lucide-react';
+import { Users, FolderOpen } from 'lucide-react';
 import { ContactsPage } from './ContactsPage';
 import { ContactGroupsPage } from './ContactGroupsPage';
 import { ContactGroupDetailPage } from './ContactGroupDetailPage';
-import { HierarchicalGroupsPage } from './HierarchicalGroupsPage';
 
-type View = 'contacts' | 'groups' | 'group-detail' | 'hierarchical';
+type View = 'contacts' | 'groups' | 'group-detail';
 
 export function ContactsWrapper() {
   const [currentView, setCurrentView] = useState<View>('contacts');
@@ -22,7 +21,7 @@ export function ContactsWrapper() {
   };
 
   if (currentView === 'group-detail' && selectedGroupId) {
-    return <ContactGroupDetailPage groupId={selectedGroupId} onBack={handleBackToGroups} />;
+    return <ContactGroupDetailPage groupId={selectedGroupId} onBack={handleBackToGroups} onOpenSubgroup={handleOpenGroup} />;
   }
 
   return (
@@ -51,23 +50,11 @@ export function ContactsWrapper() {
             <FolderOpen className="w-5 h-5" />
             Группы
           </button>
-          <button
-            onClick={() => setCurrentView('hierarchical')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-              currentView === 'hierarchical'
-                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-          >
-            <FolderTree className="w-5 h-5" />
-            Иерархия групп
-          </button>
         </div>
       </div>
 
       {currentView === 'contacts' && <ContactsPage />}
       {currentView === 'groups' && <ContactGroupsPage onOpenGroup={handleOpenGroup} />}
-      {currentView === 'hierarchical' && <HierarchicalGroupsPage />}
     </div>
   );
 }
