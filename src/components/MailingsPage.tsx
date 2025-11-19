@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Send, Plus, Trash2, Eye, X, CheckCircle, XCircle, Clock, Upload, Edit2, FolderOpen, ChevronDown } from 'lucide-react';
 import { supabase, Mailing, Contact, Email, ContactGroup } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { MailingsPingPage } from './MailingsPingPage';
 
 interface MailingRecipient {
   id: string;
@@ -51,7 +52,7 @@ export function MailingsPage() {
   const [mailingToDelete, setMailingToDelete] = useState<Mailing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'failed'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'failed' | 'ping'>('pending');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const [newMailing, setNewMailing] = useState({
@@ -649,10 +650,23 @@ export function MailingsPage() {
             >
               Неудачные
             </button>
+            <button
+              onClick={() => setActiveTab('ping')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'ping'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              Пинг
+            </button>
           </nav>
         </div>
 
-        <div className="p-6">
+        {activeTab === 'ping' ? (
+          <MailingsPingPage />
+        ) : (
+          <div className="p-6">
           {filteredMailings.length === 0 ? (
             <div className="text-center py-12">
               <Send className="w-12 h-12 text-gray-400 mx-auto mb-3" />
@@ -735,7 +749,8 @@ export function MailingsPage() {
               ))}
             </div>
           )}
-        </div>
+          </div>
+        )}
       </div>
 
       {showCreateModal && (

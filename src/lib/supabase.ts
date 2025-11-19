@@ -85,6 +85,10 @@ export interface ContactGroup {
   default_text_content: string | null;
   default_html_content: string | null;
   default_sender_email_id: string | null;
+  ping_subject: string | null;
+  ping_text_content: string | null;
+  ping_html_content: string | null;
+  ping_delay_days: number;
   created_at: string;
   updated_at: string;
 }
@@ -94,4 +98,20 @@ export interface ContactGroupMember {
   group_id: string;
   contact_id: string;
   created_at: string;
+}
+
+export interface MailingPingTracking {
+  id: string;
+  mailing_recipient_id: string;
+  initial_sent_at: string;
+  response_received: boolean;
+  response_received_at: string | null;
+  ping_sent: boolean;
+  ping_sent_at: string | null;
+  ping_subject: string | null;
+  ping_text_content: string | null;
+  ping_html_content: string | null;
+  status: 'awaiting_response' | 'response_received' | 'ping_sent' | 'no_response';
+  created_at: string;
+  updated_at: string;
 }
