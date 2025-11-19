@@ -222,62 +222,39 @@ export function MailingsPage() {
         (id) => !newMailing.exclude_contacts.includes(id)
       );
 
+      const { data: mainMailing } = await supabase.from('mailings').insert({
+        user_id: user.id,
+        subject: newMailing.subject,
+        text_content: newMailing.text_content || null,
+        html_content: newMailing.html_content || null,
+        scheduled_at: scheduledAt,
+        timezone: newMailing.timezone,
+        status: newMailing.send_now ? 'sending' : 'pending',
+        sent_count: 0,
+        success_count: 0,
+        failed_count: 0,
+      }).select().single();
+
+      if (!mainMailing) {
+        throw new Error('Не удалось создать рассылку');
+      }
+
       const recipientsToCreate = [];
 
       for (const contactId of finalContacts) {
         const contact = contacts.find((c) => c.id === contactId);
         if (!contact) continue;
 
-        const { data: groupMemberships } = await supabase
-          .from('contact_group_members')
-          .select('group_id')
-          .eq('contact_id', contactId);
+        const senderEmailId = contact?.default_sender_email_id || emails[0]?.id || null;
 
-        const contactGroupIds = groupMemberships?.map((m) => m.group_id) || [];
-        const selectedGroup = newMailing.selected_groups.find((gid) => contactGroupIds.includes(gid));
-
-        let subject = newMailing.subject;
-        let textContent = newMailing.text_content || null;
-        let htmlContent = newMailing.html_content || null;
-
-        if (selectedGroup) {
-          const group = groups.find((g) => g.id === selectedGroup);
-          if (group) {
-            if (group.default_subject) subject = group.default_subject;
-            if (group.default_text_content) textContent = group.default_text_content;
-            if (group.default_html_content) htmlContent = group.default_html_content;
-          }
-        }
-
-        const contactName = contact.name || contact.email;
-        if (textContent) textContent = textContent.replace(/\[NAME\]/g, contactName);
-        if (htmlContent) htmlContent = htmlContent.replace(/\[NAME\]/g, contactName);
-
-        const { data: personalMailing } = await supabase.from('mailings').insert({
-          user_id: user.id,
-          subject,
-          text_content: textContent,
-          html_content: htmlContent,
-          scheduled_at: scheduledAt,
-          timezone: newMailing.timezone,
-          status: newMailing.send_now ? 'sending' : 'pending',
-          sent_count: 0,
-          success_count: 0,
-          failed_count: 0,
-        }).select().single();
-
-        if (personalMailing) {
-          const senderEmailId = contact?.default_sender_email_id || emails[0]?.id || null;
-
-          recipientsToCreate.push({
-            mailing_id: personalMailing.id,
-            contact_id: contactId,
-            sender_email_id: senderEmailId,
-            status: 'pending',
-            sent_at: null,
-            error_message: null,
-          });
-        }
+        recipientsToCreate.push({
+          mailing_id: mainMailing.id,
+          contact_id: contactId,
+          sender_email_id: senderEmailId,
+          status: 'pending',
+          sent_at: null,
+          error_message: null,
+        });
       }
 
       if (recipientsToCreate.length > 0) {

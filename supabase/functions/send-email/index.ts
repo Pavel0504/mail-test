@@ -56,10 +56,8 @@ Deno.serve(async (req: Request) => {
     const smtpUser = sender_email.email;
     const smtpPass = sender_email.password;
 
-    // Сформируем полный raw RFC-822 message (можно дополнить заголовками)
     let emailBody = "";
 
-    // Добавим Date и Message-ID для корректности (Message-ID простая реализация)
     const dateHeader = new Date().toUTCString();
     const messageId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@${smtpHost}>`;
 
@@ -100,7 +98,7 @@ Deno.serve(async (req: Request) => {
       emailBody += `${mailing.html_content}\r\n`;
     }
 
-    // --- SMTP отправка (как у вас было) ---
+    // SMTP отправка
     const conn = await Deno.connect({
       hostname: smtpHost,
       port: smtpPort,
@@ -156,7 +154,6 @@ Deno.serve(async (req: Request) => {
     await writeLine("DATA");
     await readLine();
 
-    // Отправляем тело (включая завершающую точку)
     await tlsConn.write(encoder.encode(emailBody));
     await writeLine(".");
     const dataResponse = await readLine();
@@ -168,7 +165,7 @@ Deno.serve(async (req: Request) => {
       throw new Error("Email sending failed: " + dataResponse);
     }
 
-    // --- Если отправка успешна — пробуем APPEND через IMAP чтобы сохранить в папке "Sent" ---
+    // Сохранение в папку Sent (fire-and-forget)
     (async () => {
       try {
         const imapHost = Deno.env.get("IMAP_HOST") || "imap.hostinger.com";
@@ -190,13 +187,10 @@ Deno.serve(async (req: Request) => {
           await imapTls.write(imapEncoder.encode(line + "\r\n"));
         };
 
-        // Read banner
-        let banner = await readImap();
+        await readImap();
 
-        // LOGIN (tag A001)
         const tagLogin = "A001";
         await writeImap(`${tagLogin} LOGIN "${smtpUser.replace(/"/g, '\\"')}" "${smtpPass.replace(/"/g, '\\"')}"`);
-        // read until tagged response
         let loginResp = "";
         for (;;) {
           const chunk = await readImap();
@@ -204,13 +198,11 @@ Deno.serve(async (req: Request) => {
           if (loginResp.includes(`${tagLogin} OK`) || loginResp.includes(`${tagLogin} NO`) || loginResp.includes(`${tagLogin} BAD`)) break;
         }
         if (!loginResp.includes(`${tagLogin} OK`)) {
-          // login failed
           try { imapTls.close(); } catch (e) {}
           console.error("IMAP login failed:", loginResp);
           return;
         }
 
-        // Попытаемся APPEND в несколько возможных папок по очереди
         const candidateMailboxes = ['Sent', 'INBOX.Sent', 'Sent Messages', 'Отправленные'];
         const fullMessage = emailBody.endsWith("\r\n") ? emailBody : emailBody + "\r\n";
         const messageBytes = imapEncoder.encode(fullMessage);
@@ -219,17 +211,11 @@ Deno.serve(async (req: Request) => {
         let appended = false;
         for (const mbox of candidateMailboxes) {
           const tagAppend = "A003";
-          // APPEND "Mailbox" {<size>}
           await writeImap(`${tagAppend} APPEND "${mbox}" {${literalSize}}`);
-          // server should reply with continuation "+"
           let contResp = await readImap();
-          // if the server returns something containing '+' then send literal
           if (contResp.startsWith("+") || contResp.includes("+")) {
-            // send the raw message bytes (no extra quoting)
             await imapTls.write(messageBytes);
-            // ensure CRLF after message
             await imapTls.write(imapEncoder.encode("\r\n"));
-            // read until tagged response
             let appendResp = "";
             for (;;) {
               const chunk = await readImap();
@@ -240,22 +226,17 @@ Deno.serve(async (req: Request) => {
               appended = true;
               break;
             } else {
-              // try next mailbox
               continue;
             }
           } else {
-            // If server immediately denies, try next mailbox
             continue;
           }
         }
 
-        // LOGOUT
         try {
           await writeImap(`A004 LOGOUT`);
           await readImap();
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
         try { imapTls.close(); } catch (e) {}
         if (!appended) {
           console.error("IMAP APPEND did not succeed for any mailbox");
@@ -263,9 +244,11 @@ Deno.serve(async (req: Request) => {
       } catch (imapErr) {
         console.error("Failed to save sent message via IMAP:", imapErr);
       }
-    })(); // fire-and-forget saving to Sent (не ломаем основной ответ)
+    })();
 
-    // --- Обновления в базе как раньше ---
+    const sentAt = new Date().toISOString();
+
+    // Обновляем статус получателя
     await fetch(`${supabaseUrl}/rest/v1/mailing_recipients?id=eq.${recipient_id}`, {
       method: "PATCH",
       headers: {
@@ -276,10 +259,11 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         status: "sent",
-        sent_at: new Date().toISOString(),
+        sent_at: sentAt,
       }),
     });
 
+    // Обновляем статистику email
     await fetch(`${supabaseUrl}/rest/v1/emails?id=eq.${sender_email.id}`, {
       method: "PATCH",
       headers: {
@@ -294,6 +278,7 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
+    // Обновляем статистику рассылки
     const mailingRes = await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}&select=sent_count,success_count`, {
       headers: {
         "apikey": supabaseServiceKey,
@@ -317,6 +302,25 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
+    // Создаем ping tracking запись
+    await fetch(`${supabaseUrl}/rest/v1/mailing_ping_tracking`, {
+      method: "POST",
+      headers: {
+        "apikey": supabaseServiceKey,
+        "Authorization": `Bearer ${supabaseServiceKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify({
+        mailing_recipient_id: recipient_id,
+        initial_sent_at: sentAt,
+        response_received: false,
+        ping_sent: false,
+        status: "awaiting_response",
+      }),
+    });
+
+    // Проверяем все ли получатели обработаны
     const allRecipientsRes = await fetch(
       `${supabaseUrl}/rest/v1/mailing_recipients?mailing_id=eq.${mailing.id}&select=status`,
       {
@@ -330,9 +334,6 @@ Deno.serve(async (req: Request) => {
     const allProcessed = allRecipients.every((r: { status: string }) => r.status !== "pending");
 
     if (allProcessed) {
-      const hasFailures = allRecipients.some((r: { status: string }) => r.status === "failed");
-      const finalStatus = hasFailures ? "completed" : "completed";
-
       await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
         method: "PATCH",
         headers: {
@@ -341,7 +342,7 @@ Deno.serve(async (req: Request) => {
           "Content-Type": "application/json",
           "Prefer": "return=minimal",
         },
-        body: JSON.stringify({ status: finalStatus }),
+        body: JSON.stringify({ status: "sent" }),
       });
     }
 
@@ -443,7 +444,7 @@ Deno.serve(async (req: Request) => {
               "Content-Type": "application/json",
               "Prefer": "return=minimal",
             },
-            body: JSON.stringify({ status: "completed" }),
+            body: JSON.stringify({ status: "failed" }),
           });
         }
       }
