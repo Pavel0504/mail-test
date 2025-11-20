@@ -21,9 +21,6 @@ Deno.serve(async (req: Request) => {
 
     const { recipient_id } = await req.json() as SendEmailRequest;
 
-    // ЗАДЕРЖКА 5 СЕКУНД ПЕРЕД ОТПРАВКОЙ
-    await new Promise((res) => setTimeout(res, 5000));
-
     const recipientRes = await fetch(`${supabaseUrl}/rest/v1/mailing_recipients?id=eq.${recipient_id}&select=*,mailing:mailings(*),contact:contacts(*),sender_email:emails(*)`, {
       headers: {
         "apikey": supabaseServiceKey,
@@ -303,13 +300,13 @@ Deno.serve(async (req: Request) => {
     });
 
     // Создаем ping tracking запись
-    await fetch(`${supabaseUrl}/rest/v1/mailing_ping_tracking`, {
+    const pingTrackingRes = await fetch(`${supabaseUrl}/rest/v1/mailing_ping_tracking`, {
       method: "POST",
       headers: {
         "apikey": supabaseServiceKey,
         "Authorization": `Bearer ${supabaseServiceKey}`,
         "Content-Type": "application/json",
-        "Prefer": "return=minimal",
+        "Prefer": "return=representation",
       },
       body: JSON.stringify({
         mailing_recipient_id: recipient_id,
@@ -319,6 +316,14 @@ Deno.serve(async (req: Request) => {
         status: "awaiting_response",
       }),
     });
+
+    if (!pingTrackingRes.ok) {
+      const pingError = await pingTrackingRes.text();
+      console.error("Failed to create ping tracking:", pingError);
+    } else {
+      const pingData = await pingTrackingRes.json();
+      console.log("Ping tracking created:", pingData);
+    }
 
     // Проверяем все ли получатели обработаны
     const allRecipientsRes = await fetch(
@@ -334,6 +339,17 @@ Deno.serve(async (req: Request) => {
     const allProcessed = allRecipients.every((r: { status: string }) => r.status !== "pending");
 
     if (allProcessed) {
+      // Определяем финальный статус рассылки
+      const hasSuccessful = allRecipients.some((r: { status: string }) => r.status === "sent");
+      const allFailed = allRecipients.every((r: { status: string }) => r.status === "failed");
+
+      let finalStatus = "completed";
+      if (allFailed) {
+        finalStatus = "failed";
+      } else if (hasSuccessful) {
+        finalStatus = "sent";
+      }
+
       await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
         method: "PATCH",
         headers: {
@@ -342,7 +358,7 @@ Deno.serve(async (req: Request) => {
           "Content-Type": "application/json",
           "Prefer": "return=minimal",
         },
-        body: JSON.stringify({ status: "sent" }),
+        body: JSON.stringify({ status: finalStatus }),
       });
     }
 
