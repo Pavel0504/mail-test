@@ -452,6 +452,16 @@ Deno.serve(async (req: Request) => {
         const allProcessed = allRecipients.every((r: { status: string }) => r.status !== "pending");
 
         if (allProcessed) {
+          const hasSuccessful = allRecipients.some((r: { status: string }) => r.status === "sent");
+          const allFailed = allRecipients.every((r: { status: string }) => r.status === "failed");
+
+          let finalStatus = "sent";
+          if (allFailed) {
+            finalStatus = "failed";
+          } else if (hasSuccessful) {
+            finalStatus = "sent";
+          }
+
           await fetch(`${supabaseUrl}/rest/v1/mailings?id=eq.${mailing.id}`, {
             method: "PATCH",
             headers: {
@@ -460,7 +470,7 @@ Deno.serve(async (req: Request) => {
               "Content-Type": "application/json",
               "Prefer": "return=minimal",
             },
-            body: JSON.stringify({ status: "failed" }),
+            body: JSON.stringify({ status: finalStatus }),
           });
         }
       }
