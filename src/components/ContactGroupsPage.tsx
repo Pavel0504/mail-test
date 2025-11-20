@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, Edit2, Trash2, FolderOpen, Upload } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, FolderOpen } from 'lucide-react';
 import { supabase, ContactGroup, Contact } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -24,24 +24,10 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
 
   const [newGroup, setNewGroup] = useState({
     name: '',
-    default_subject: '',
-    default_text_content: '',
-    default_html_content: '',
-    ping_subject: '',
-    ping_text_content: '',
-    ping_html_content: '',
-    ping_delay_days: 3,
   });
 
   const [editForm, setEditForm] = useState({
     name: '',
-    default_subject: '',
-    default_text_content: '',
-    default_html_content: '',
-    ping_subject: '',
-    ping_text_content: '',
-    ping_html_content: '',
-    ping_delay_days: 3,
   });
 
   useEffect(() => {
@@ -57,6 +43,7 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
       .from('contact_groups')
       .select('*')
       .eq('user_id', user.id)
+      .is('parent_group_id', null)
       .order('created_at', { ascending: false });
 
     if (groupsData) {
@@ -89,13 +76,6 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
       const { error: insertError } = await supabase.from('contact_groups').insert({
         name: newGroup.name,
         user_id: user.id,
-        default_subject: newGroup.default_subject || null,
-        default_text_content: newGroup.default_text_content || null,
-        default_html_content: newGroup.default_html_content || null,
-        ping_subject: newGroup.ping_subject || null,
-        ping_text_content: newGroup.ping_text_content || null,
-        ping_html_content: newGroup.ping_html_content || null,
-        ping_delay_days: newGroup.ping_delay_days || 3,
       });
 
       if (insertError) throw insertError;
@@ -108,7 +88,7 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
         details: { name: newGroup.name },
       });
 
-      setNewGroup({ name: '', default_subject: '', default_text_content: '', default_html_content: '', ping_subject: '', ping_text_content: '', ping_html_content: '', ping_delay_days: 3 });
+      setNewGroup({ name: '' });
       setShowAddModal(false);
       loadGroups();
     } catch (err) {
@@ -130,13 +110,6 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
         .from('contact_groups')
         .update({
           name: editForm.name,
-          default_subject: editForm.default_subject || null,
-          default_text_content: editForm.default_text_content || null,
-          default_html_content: editForm.default_html_content || null,
-          ping_subject: editForm.ping_subject || null,
-          ping_text_content: editForm.ping_text_content || null,
-          ping_html_content: editForm.ping_html_content || null,
-          ping_delay_days: editForm.ping_delay_days || 3,
           updated_at: new Date().toISOString(),
         })
         .eq('id', groupToEdit.id);
@@ -159,13 +132,48 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
     }
   };
 
+  const deleteGroupRecursive = async (groupIdToDelete: string) => {
+    const { data: subgroups } = await supabase
+      .from('contact_groups')
+      .select('id')
+      .eq('parent_group_id', groupIdToDelete);
+
+    if (subgroups) {
+      for (const subgroup of subgroups) {
+        await deleteGroupRecursive(subgroup.id);
+      }
+    }
+
+    const { data: members } = await supabase
+      .from('contact_group_members')
+      .select('contact_id')
+      .eq('group_id', groupIdToDelete);
+
+    if (members) {
+      for (const member of members) {
+        const { data: otherMemberships } = await supabase
+          .from('contact_group_members')
+          .select('id')
+          .eq('contact_id', member.contact_id)
+          .neq('group_id', groupIdToDelete);
+
+        if (!otherMemberships || otherMemberships.length === 0) {
+          await supabase.from('contact_history').delete().eq('contact_id', member.contact_id);
+          await supabase.from('contacts').delete().eq('id', member.contact_id);
+        }
+      }
+    }
+
+    await supabase.from('contact_group_members').delete().eq('group_id', groupIdToDelete);
+    await supabase.from('contact_groups').delete().eq('id', groupIdToDelete);
+  };
+
   const handleDeleteGroup = async () => {
     if (!groupToDelete || !user) return;
 
     setLoading(true);
     try {
-      await supabase.from('contact_group_members').delete().eq('group_id', groupToDelete.id);
-      await supabase.from('contact_groups').delete().eq('id', groupToDelete.id);
+      await deleteGroupRecursive(groupToDelete.id);
 
       await supabase.from('activity_logs').insert({
         user_id: user.id,
@@ -189,38 +197,10 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
     setGroupToEdit(group);
     setEditForm({
       name: group.name,
-      default_subject: group.default_subject || '',
-      default_text_content: group.default_text_content || '',
-      default_html_content: group.default_html_content || '',
-      ping_subject: group.ping_subject || '',
-      ping_text_content: group.ping_text_content || '',
-      ping_html_content: group.ping_html_content || '',
-      ping_delay_days: group.ping_delay_days || 3,
     });
     setShowEditModal(true);
   };
 
-  const handleFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    type: 'text' | 'html',
-    isEdit: boolean = false
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const content = await file.text();
-    if (isEdit) {
-      setEditForm((prev) => ({
-        ...prev,
-        [type === 'text' ? 'default_text_content' : 'default_html_content']: content,
-      }));
-    } else {
-      setNewGroup((prev) => ({
-        ...prev,
-        [type === 'text' ? 'default_text_content' : 'default_html_content']: content,
-      }));
-    }
-  };
 
   return (
     <div className="p-6">
@@ -261,11 +241,6 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       Контактов: {group.memberCount}
                     </p>
-                    {group.default_subject && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 truncate">
-                        Тема: {group.default_subject}
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -324,134 +299,12 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Тема письма по умолчанию
-                </label>
-                <input
-                  type="text"
-                  value={newGroup.default_subject}
-                  onChange={(e) => setNewGroup({ ...newGroup, default_subject: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                  placeholder="Тема письма"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Текст письма
-                  </label>
-                  <label className="flex items-center gap-2 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg cursor-pointer transition-colors">
-                    <Upload className="w-4 h-4" />
-                    Загрузить .txt
-                    <input
-                      type="file"
-                      accept=".txt"
-                      onChange={(e) => handleFileUpload(e, 'text')}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                <textarea
-                  value={newGroup.default_text_content}
-                  onChange={(e) => setNewGroup({ ...newGroup, default_text_content: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                  placeholder="Текстовое содержимое письма"
-                  rows={4}
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    HTML письма
-                  </label>
-                  <label className="flex items-center gap-2 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg cursor-pointer transition-colors">
-                    <Upload className="w-4 h-4" />
-                    Загрузить .html
-                    <input
-                      type="file"
-                      accept=".html"
-                      onChange={(e) => handleFileUpload(e, 'html')}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                <textarea
-                  value={newGroup.default_html_content}
-                  onChange={(e) => setNewGroup({ ...newGroup, default_html_content: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                  placeholder="HTML содержимое письма"
-                  rows={4}
-                />
-              </div>
-
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-3">Настройки пинг-писем</h3>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Задержка перед отправкой пинга (дни)
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={newGroup.ping_delay_days}
-                      onChange={(e) => setNewGroup({ ...newGroup, ping_delay_days: parseInt(e.target.value) || 3 })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Тема пинг-письма
-                    </label>
-                    <input
-                      type="text"
-                      value={newGroup.ping_subject}
-                      onChange={(e) => setNewGroup({ ...newGroup, ping_subject: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                      placeholder="Тема пинг-письма"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Текст пинг-письма
-                    </label>
-                    <textarea
-                      value={newGroup.ping_text_content}
-                      onChange={(e) => setNewGroup({ ...newGroup, ping_text_content: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                      placeholder="Текст пинг-письма"
-                      rows={3}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      HTML пинг-письма
-                    </label>
-                    <textarea
-                      value={newGroup.ping_html_content}
-                      onChange={(e) => setNewGroup({ ...newGroup, ping_html_content: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                      placeholder="HTML пинг-письма"
-                      rows={3}
-                    />
-                  </div>
-                </div>
-              </div>
-
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => {
                     setShowAddModal(false);
-                    setNewGroup({ name: '', default_subject: '', default_text_content: '', default_html_content: '', ping_subject: '', ping_text_content: '', ping_html_content: '', ping_delay_days: 3 });
+                    setNewGroup({ name: '' });
                     setError('');
                   }}
                   className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
@@ -494,125 +347,6 @@ export function ContactGroupsPage({ onOpenGroup }: ContactGroupsPageProps) {
                   className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
                   required
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Тема письма по умолчанию
-                </label>
-                <input
-                  type="text"
-                  value={editForm.default_subject}
-                  onChange={(e) => setEditForm({ ...editForm, default_subject: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Текст письма
-                  </label>
-                  <label className="flex items-center gap-2 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg cursor-pointer transition-colors">
-                    <Upload className="w-4 h-4" />
-                    Загрузить .txt
-                    <input
-                      type="file"
-                      accept=".txt"
-                      onChange={(e) => handleFileUpload(e, 'text', true)}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                <textarea
-                  value={editForm.default_text_content}
-                  onChange={(e) => setEditForm({ ...editForm, default_text_content: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                  rows={4}
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    HTML письма
-                  </label>
-                  <label className="flex items-center gap-2 px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg cursor-pointer transition-colors">
-                    <Upload className="w-4 h-4" />
-                    Загрузить .html
-                    <input
-                      type="file"
-                      accept=".html"
-                      onChange={(e) => handleFileUpload(e, 'html', true)}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-                <textarea
-                  value={editForm.default_html_content}
-                  onChange={(e) => setEditForm({ ...editForm, default_html_content: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                  rows={4}
-                />
-              </div>
-
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-3">Настройки пинг-писем</h3>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Задержка перед отправкой пинга (дни)
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="30"
-                      value={editForm.ping_delay_days}
-                      onChange={(e) => setEditForm({ ...editForm, ping_delay_days: parseInt(e.target.value) || 3 })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Тема пинг-письма
-                    </label>
-                    <input
-                      type="text"
-                      value={editForm.ping_subject}
-                      onChange={(e) => setEditForm({ ...editForm, ping_subject: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                      placeholder="Тема пинг-письма"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Текст пинг-письма
-                    </label>
-                    <textarea
-                      value={editForm.ping_text_content}
-                      onChange={(e) => setEditForm({ ...editForm, ping_text_content: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                      placeholder="Текст пинг-письма"
-                      rows={3}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      HTML пинг-письма
-                    </label>
-                    <textarea
-                      value={editForm.ping_html_content}
-                      onChange={(e) => setEditForm({ ...editForm, ping_html_content: e.target.value })}
-                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                      placeholder="HTML пинг-письма"
-                      rows={3}
-                    />
-                  </div>
-                </div>
               </div>
 
               <div className="flex gap-3 pt-4">

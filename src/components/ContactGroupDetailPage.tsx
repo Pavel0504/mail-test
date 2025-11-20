@@ -762,13 +762,15 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
               <FolderOpen className="w-5 h-5" />
               Подгруппы
             </h2>
-            <button
-              onClick={() => setShowSubgroupModal(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Создать подгруппу
-            </button>
+            {!group.parent_group_id && (
+              <button
+                onClick={() => setShowSubgroupModal(true)}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Создать подгруппу
+              </button>
+            )}
           </div>
 
           {subgroups.length === 0 ? (
