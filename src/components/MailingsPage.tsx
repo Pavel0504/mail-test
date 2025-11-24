@@ -23,6 +23,124 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { MailingsPingPage } from "./MailingsPingPage";
 
+interface GroupWithSubgroupsProps {
+  group: ContactGroup;
+  isSelected: boolean;
+  isExpanded: boolean;
+  emails: Email[];
+  subgroupEmailOverrides: Record<string, string>;
+  onToggle: () => void;
+  onCheckChange: (checked: boolean) => void;
+  onEmailOverride: (subgroupId: string, emailId: string) => void;
+}
+
+function GroupWithSubgroups({
+  group,
+  isSelected,
+  isExpanded,
+  emails,
+  subgroupEmailOverrides,
+  onToggle,
+  onCheckChange,
+  onEmailOverride,
+}: GroupWithSubgroupsProps) {
+  const [subgroups, setSubgroups] = useState<ContactGroup[]>([]);
+  const [loadingSubgroups, setLoadingSubgroups] = useState(false);
+
+  useEffect(() => {
+    if (isExpanded && subgroups.length === 0) {
+      loadSubgroups();
+    }
+  }, [isExpanded]);
+
+  const loadSubgroups = async () => {
+    setLoadingSubgroups(true);
+    const { data } = await supabase
+      .from("contact_groups")
+      .select("*")
+      .eq("parent_group_id", group.id)
+      .order("name", { ascending: true });
+
+    if (data) {
+      setSubgroups(data);
+    }
+    setLoadingSubgroups(false);
+  };
+
+  return (
+    <div className="border border-gray-300 dark:border-gray-600 rounded-lg">
+      <div className="p-4 bg-gray-50 dark:bg-gray-700/50 flex items-center justify-between">
+        <div className="flex items-center gap-3 flex-1">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={(e) => onCheckChange(e.target.checked)}
+            className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex items-center gap-2 text-left flex-1"
+          >
+            <ChevronDown
+              className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${
+                isExpanded ? "" : "-rotate-90"
+              }`}
+            />
+            <FolderOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <span className="font-medium text-gray-900 dark:text-white">
+              {group.name}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="border-t border-gray-300 dark:border-gray-600 p-4 space-y-2 bg-white dark:bg-gray-800">
+          {loadingSubgroups ? (
+            <div className="flex items-center justify-center py-4">
+              <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : subgroups.length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-2">
+              Нет подгрупп
+            </p>
+          ) : (
+            subgroups.map((subgroup) => (
+              <div
+                key={subgroup.id}
+                className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600"
+              >
+                <FolderOpen className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <span className="text-sm text-gray-900 dark:text-white flex-1">
+                  {subgroup.name}
+                </span>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                    Почта для рассылки:
+                  </label>
+                  <select
+                    value={subgroupEmailOverrides[subgroup.id] || ""}
+                    onChange={(e) => onEmailOverride(subgroup.id, e.target.value)}
+                    className="px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white min-w-[200px]"
+                  >
+                    <option value="">По умолчанию</option>
+                    {emails.map((email) => (
+                      <option key={email.id} value={email.id}>
+                        {email.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface MailingRecipient {
   id: string;
   mailing_id: string;
@@ -89,6 +207,7 @@ export function MailingsPage() {
     selected_groups: [] as string[],
     exclude_contacts: [] as string[],
     send_now: false,
+    subgroup_email_overrides: {} as Record<string, string>,
   });
 
   useEffect(() => {
@@ -187,6 +306,7 @@ export function MailingsPage() {
       .from("contact_groups")
       .select("*")
       .eq("user_id", user.id)
+      .is("parent_group_id", null)
       .order("name", { ascending: true });
 
     if (data) {
@@ -233,6 +353,40 @@ export function MailingsPage() {
         scheduledAt = new Date(dateTime).toISOString();
       }
 
+      // Загружаем контент из первой выбранной подгруппы
+      let mailingSubject = "";
+      let mailingTextContent = null;
+      let mailingHtmlContent = null;
+
+      if (newMailing.selected_groups.length > 0) {
+        const { data: firstGroup } = await supabase
+          .from("contact_groups")
+          .select("*")
+          .eq("id", newMailing.selected_groups[0])
+          .single();
+
+        if (firstGroup) {
+          // Загружаем контент из первой подгруппы
+          const { data: subgroups } = await supabase
+            .from("contact_groups")
+            .select("*")
+            .eq("parent_group_id", firstGroup.id)
+            .limit(1);
+
+          if (subgroups && subgroups.length > 0) {
+            const subgroup = subgroups[0];
+            mailingSubject = subgroup.default_subject || "";
+            mailingTextContent = subgroup.default_text_content || null;
+            mailingHtmlContent = subgroup.default_html_content || null;
+          } else {
+            // Если нет подгрупп, используем контент родительской группы
+            mailingSubject = firstGroup.default_subject || "";
+            mailingTextContent = firstGroup.default_text_content || null;
+            mailingHtmlContent = firstGroup.default_html_content || null;
+          }
+        }
+      }
+
       let allContactIds = [...newMailing.selected_contacts];
 
       for (const groupId of newMailing.selected_groups) {
@@ -256,9 +410,9 @@ export function MailingsPage() {
         .from("mailings")
         .insert({
           user_id: user.id,
-          subject: newMailing.subject,
-          text_content: newMailing.text_content || null,
-          html_content: newMailing.html_content || null,
+          subject: mailingSubject,
+          text_content: mailingTextContent,
+          html_content: mailingHtmlContent,
           scheduled_at: scheduledAt,
           timezone: newMailing.timezone,
           status: newMailing.send_now ? "sending" : "pending",
@@ -274,13 +428,43 @@ export function MailingsPage() {
       }
 
       const recipientsToCreate = [];
+      const groupEmailMap: Record<string, string> = {};
+
+      for (const groupId of newMailing.selected_groups) {
+        const { data: subgroups } = await supabase
+          .from("contact_groups")
+          .select("id")
+          .eq("parent_group_id", groupId);
+
+        if (subgroups) {
+          for (const subgroup of subgroups) {
+            const emailOverride = newMailing.subgroup_email_overrides[subgroup.id];
+            if (emailOverride) {
+              groupEmailMap[subgroup.id] = emailOverride;
+            }
+          }
+        }
+      }
 
       for (const contactId of finalContacts) {
         const contact = contacts.find((c) => c.id === contactId);
         if (!contact) continue;
 
-        const senderEmailId =
-          contact?.default_sender_email_id || emails[0]?.id || null;
+        const { data: memberships } = await supabase
+          .from("contact_group_members")
+          .select("group_id")
+          .eq("contact_id", contactId);
+
+        let senderEmailId = contact?.default_sender_email_id || emails[0]?.id || null;
+
+        if (memberships && memberships.length > 0) {
+          for (const membership of memberships) {
+            if (groupEmailMap[membership.group_id]) {
+              senderEmailId = groupEmailMap[membership.group_id];
+              break;
+            }
+          }
+        }
 
         recipientsToCreate.push({
           mailing_id: mainMailing.id,
@@ -338,6 +522,7 @@ export function MailingsPage() {
         selected_groups: [],
         exclude_contacts: [],
         send_now: false,
+        subgroup_email_overrides: {},
       });
       setShowCreateModal(false);
       loadMailings();
@@ -453,6 +638,7 @@ export function MailingsPage() {
         selected_groups: [],
         exclude_contacts: [],
         send_now: false,
+        subgroup_email_overrides: {},
       });
       setShowEditModal(false);
       setMailingToEdit(null);
@@ -531,6 +717,7 @@ export function MailingsPage() {
       selected_groups: [],
       exclude_contacts: [],
       send_now: false,
+      subgroup_email_overrides: {},
     });
 
     setShowEditModal(true);
@@ -827,84 +1014,6 @@ export function MailingsPage() {
             <form onSubmit={handleCreateMailing} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Тема письма
-                </label>
-                <input
-                  type="text"
-                  value={newMailing.subject}
-                  onChange={(e) =>
-                    setNewMailing({ ...newMailing, subject: e.target.value })
-                  }
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
-                  placeholder="Введите тему письма"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Текст письма (используйте [NAME] для имени контакта)
-                    </label>
-                    <label className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded cursor-pointer transition-colors">
-                      <Upload className="w-3 h-3" />
-                      Загрузить .txt
-                      <input
-                        type="file"
-                        accept=".txt"
-                        onChange={handleLoadTextFile}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                  <textarea
-                    value={newMailing.text_content}
-                    onChange={(e) =>
-                      setNewMailing({
-                        ...newMailing,
-                        text_content: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                    placeholder="Введите текст письма"
-                    rows={8}
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      HTML письма (используйте [NAME] для имени контакта)
-                    </label>
-                    <label className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded cursor-pointer transition-colors">
-                      <Upload className="w-3 h-3" />
-                      Загрузить .html
-                      <input
-                        type="file"
-                        accept=".html"
-                        onChange={handleLoadHtmlFile}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                  <textarea
-                    value={newMailing.html_content}
-                    onChange={(e) =>
-                      setNewMailing({
-                        ...newMailing,
-                        html_content: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
-                    placeholder="Введите HTML код"
-                    rows={8}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   <div className="flex items-center gap-2">
                     <FolderOpen className="w-4 h-4" />
                     Выбор групп
@@ -918,113 +1027,49 @@ export function MailingsPage() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {groups.map((group) => {
-                      const isExpanded = expandedGroups.has(group.id);
-                      const isSelected = newMailing.selected_groups.includes(
-                        group.id
-                      );
-                      return (
-                        <div
-                          key={group.id}
-                          className={`border rounded-lg transition-colors ${
-                            isSelected
-                              ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                              : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-                          }`}
-                        >
-                          <div
-                            className="p-4 cursor-pointer flex items-start gap-3"
-                            onClick={() => {
-                              const newExpanded = new Set(expandedGroups);
-                              if (isExpanded) {
-                                newExpanded.delete(group.id);
-                              } else {
-                                newExpanded.add(group.id);
-                              }
-                              setExpandedGroups(newExpanded);
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                if (e.target.checked) {
-                                  setNewMailing({
-                                    ...newMailing,
-                                    selected_groups: [
-                                      ...newMailing.selected_groups,
-                                      group.id,
-                                    ],
-                                  });
-                                } else {
-                                  setNewMailing({
-                                    ...newMailing,
-                                    selected_groups:
-                                      newMailing.selected_groups.filter(
-                                        (id) => id !== group.id
-                                      ),
-                                  });
-                                }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 mt-0.5"
-                            />
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-gray-900 dark:text-white">
-                                  {group.name}
-                                </span>
-                                <ChevronDown
-                                  className={`w-4 h-4 text-gray-500 transition-transform ${
-                                    isExpanded ? "rotate-180" : ""
-                                  }`}
-                                />
-                              </div>
-                              {group.default_subject && !isExpanded && (
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                  Тема: {group.default_subject}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          {isExpanded && (
-                            <div className="px-4 pb-4 space-y-3 border-t border-gray-200 dark:border-gray-600 pt-3">
-                              {group.default_subject && (
-                                <div>
-                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    Тема по умолчанию:
-                                  </p>
-                                  <p className="text-sm text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded">
-                                    {group.default_subject}
-                                  </p>
-                                </div>
-                              )}
-                              {group.default_text_content && (
-                                <div>
-                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    Текст по умолчанию:
-                                  </p>
-                                  <pre className="text-xs text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
-                                    {group.default_text_content}
-                                  </pre>
-                                </div>
-                              )}
-                              {group.default_html_content && (
-                                <div>
-                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    HTML по умолчанию:
-                                  </p>
-                                  <pre className="text-xs text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-2 rounded max-h-32 overflow-y-auto whitespace-pre-wrap font-mono">
-                                    {group.default_html_content}
-                                  </pre>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {groups.map((group) => (
+                      <GroupWithSubgroups
+                        key={group.id}
+                        group={group}
+                        isSelected={newMailing.selected_groups.includes(group.id)}
+                        isExpanded={expandedGroups.has(group.id)}
+                        emails={emails}
+                        subgroupEmailOverrides={newMailing.subgroup_email_overrides}
+                        onToggle={() => {
+                          const newExpanded = new Set(expandedGroups);
+                          if (expandedGroups.has(group.id)) {
+                            newExpanded.delete(group.id);
+                          } else {
+                            newExpanded.add(group.id);
+                          }
+                          setExpandedGroups(newExpanded);
+                        }}
+                        onCheckChange={(checked) => {
+                          if (checked) {
+                            setNewMailing({
+                              ...newMailing,
+                              selected_groups: [...newMailing.selected_groups, group.id],
+                            });
+                          } else {
+                            setNewMailing({
+                              ...newMailing,
+                              selected_groups: newMailing.selected_groups.filter(
+                                (id) => id !== group.id
+                              ),
+                            });
+                          }
+                        }}
+                        onEmailOverride={(subgroupId, emailId) => {
+                          setNewMailing({
+                            ...newMailing,
+                            subgroup_email_overrides: {
+                              ...newMailing.subgroup_email_overrides,
+                              [subgroupId]: emailId,
+                            },
+                          });
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
               </div>
@@ -1194,6 +1239,7 @@ export function MailingsPage() {
                       selected_groups: [],
                       exclude_contacts: [],
                       send_now: false,
+                      subgroup_email_overrides: {},
                     });
                     setError("");
                   }}
