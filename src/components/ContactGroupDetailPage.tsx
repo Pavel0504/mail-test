@@ -52,6 +52,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     default_subject: '',
     default_text_content: '',
     default_html_content: '',
+    ping_subject: '',
+    ping_text_content: '',
+    ping_html_content: '',
   });
 
   const [editForm, setEditForm] = useState({
@@ -60,6 +63,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     default_subject: '',
     default_text_content: '',
     default_html_content: '',
+    ping_subject: '',
+    ping_text_content: '',
+    ping_html_content: '',
   });
 
   useEffect(() => {
@@ -331,6 +337,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
         default_subject: newSubgroup.default_subject || null,
         default_text_content: newSubgroup.default_text_content || null,
         default_html_content: newSubgroup.default_html_content || null,
+        ping_subject: newSubgroup.ping_subject || null,
+        ping_text_content: newSubgroup.ping_text_content || null,
+        ping_html_content: newSubgroup.ping_html_content || null,
       });
 
       if (insertError) throw insertError;
@@ -349,6 +358,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
         default_subject: '',
         default_text_content: '',
         default_html_content: '',
+        ping_subject: '',
+        ping_text_content: '',
+        ping_html_content: '',
       });
       setShowSubgroupModal(false);
       loadGroupData();
@@ -375,6 +387,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
           default_subject: editForm.default_subject || null,
           default_text_content: editForm.default_text_content || null,
           default_html_content: editForm.default_html_content || null,
+          ping_subject: editForm.ping_subject || null,
+          ping_text_content: editForm.ping_text_content || null,
+          ping_html_content: editForm.ping_html_content || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', groupId);
@@ -676,6 +691,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
                   default_subject: group.default_subject || '',
                   default_text_content: group.default_text_content || '',
                   default_html_content: group.default_html_content || '',
+                  ping_subject: group.ping_subject || '',
+                  ping_text_content: group.ping_text_content || '',
+                  ping_html_content: group.ping_html_content || '',
                 });
                 setShowEditModal(true);
               }}
@@ -762,15 +780,13 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
               <FolderOpen className="w-5 h-5" />
               Подгруппы
             </h2>
-            {!group.parent_group_id && (
-              <button
-                onClick={() => setShowSubgroupModal(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Создать подгруппу
-              </button>
-            )}
+            <button
+              onClick={() => setShowSubgroupModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Создать подгруппу
+            </button>
           </div>
 
           {subgroups.length === 0 ? (
@@ -1043,6 +1059,51 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
                 />
               </div>
 
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-3">Пинг-письмо</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Тема письма для пинга
+                    </label>
+                    <input
+                      type="text"
+                      value={newSubgroup.ping_subject}
+                      onChange={(e) => setNewSubgroup({ ...newSubgroup, ping_subject: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                      placeholder="Тема пинг-письма"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Текст для пинга
+                    </label>
+                    <textarea
+                      value={newSubgroup.ping_text_content}
+                      onChange={(e) => setNewSubgroup({ ...newSubgroup, ping_text_content: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                      placeholder="Текст пинг-письма"
+                      rows={3}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      HTML для пинга
+                    </label>
+                    <textarea
+                      value={newSubgroup.ping_html_content}
+                      onChange={(e) => setNewSubgroup({ ...newSubgroup, ping_html_content: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                      placeholder="HTML пинг-письма"
+                      rows={3}
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -1054,6 +1115,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
                       default_subject: '',
                       default_text_content: '',
                       default_html_content: '',
+                      ping_subject: '',
+                      ping_text_content: '',
+                      ping_html_content: '',
                     });
                     setError('');
                   }}
@@ -1175,6 +1239,51 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
                   className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
                   rows={3}
                 />
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                <h3 className="text-md font-semibold text-gray-900 dark:text-white mb-3">Пинг-письмо</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Тема письма для пинга
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.ping_subject}
+                      onChange={(e) => setEditForm({ ...editForm, ping_subject: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                      placeholder="Тема пинг-письма"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Текст для пинга
+                    </label>
+                    <textarea
+                      value={editForm.ping_text_content}
+                      onChange={(e) => setEditForm({ ...editForm, ping_text_content: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                      placeholder="Текст пинг-письма"
+                      rows={3}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      HTML для пинга
+                    </label>
+                    <textarea
+                      value={editForm.ping_html_content}
+                      onChange={(e) => setEditForm({ ...editForm, ping_html_content: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white font-mono text-sm"
+                      placeholder="HTML пинг-письма"
+                      rows={3}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-3 pt-4">
