@@ -171,22 +171,35 @@ export function ContactsPage() {
             });
           }
         } else {
-          await supabase.from('contacts').insert({
+          const { data: newContact, error: insertError } = await supabase.from('contacts').insert({
             email: contact.email,
             name: contact.name,
             link: contact.link,
             owner_id: user.id,
             default_sender_email_id: contact.default_sender_email_id || null,
             has_changes: false,
-          });
+          }).select().single();
 
-          await supabase.from('activity_logs').insert({
-            user_id: user.id,
-            action_type: 'create',
-            entity_type: 'contact',
-            entity_id: null,
-            details: { email: contact.email },
-          });
+          if (!insertError && newContact) {
+            await supabase.from('contact_history').insert({
+              contact_id: newContact.id,
+              action_type: 'create',
+              changed_fields: {
+                email: contact.email,
+                name: contact.name,
+                link: contact.link,
+              },
+              changed_by: user.id,
+            });
+
+            await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              action_type: 'create',
+              entity_type: 'contact',
+              entity_id: newContact.id,
+              details: { email: contact.email },
+            });
+          }
         }
       }
 
@@ -299,13 +312,27 @@ export function ContactsPage() {
             .single();
 
           if (share) {
-            await supabase.from('contacts').insert({
+            const { data: newContact, error: insertError } = await supabase.from('contacts').insert({
               email: originalContact.email,
               name: originalContact.name,
               link: originalContact.link,
               owner_id: share.requester_id,
               has_changes: false,
-            });
+            }).select().single();
+
+            if (!insertError && newContact) {
+              await supabase.from('contact_history').insert({
+                contact_id: newContact.id,
+                action_type: 'create',
+                changed_fields: {
+                  email: originalContact.email,
+                  name: originalContact.name,
+                  link: originalContact.link,
+                  shared_from: user.id,
+                },
+                changed_by: share.requester_id,
+              });
+            }
 
             await supabase.from('notifications').insert({
               user_id: share.requester_id,
