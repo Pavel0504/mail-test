@@ -450,20 +450,38 @@ export function MailingsPage() {
         const contact = contacts.find((c) => c.id === contactId);
         if (!contact) continue;
 
-        const { data: memberships } = await supabase
-          .from("contact_group_members")
-          .select("group_id")
-          .eq("contact_id", contactId);
+        let senderEmailId = null;
 
-        let senderEmailId = contact?.default_sender_email_id || emails[0]?.id || null;
+        if (contact.default_sender_email_id) {
+          senderEmailId = contact.default_sender_email_id;
+        } else {
+          const { data: memberships } = await supabase
+            .from("contact_group_members")
+            .select("group_id")
+            .eq("contact_id", contactId);
 
-        if (memberships && memberships.length > 0) {
-          for (const membership of memberships) {
-            if (groupEmailMap[membership.group_id]) {
-              senderEmailId = groupEmailMap[membership.group_id];
-              break;
+          if (memberships && memberships.length > 0) {
+            for (const membership of memberships) {
+              const subgroupEmailId = groupEmailMap[membership.group_id];
+              if (subgroupEmailId) {
+                const { data: exclusions } = await supabase
+                  .from("contact_exclusions")
+                  .select("id")
+                  .eq("email_id", subgroupEmailId)
+                  .eq("contact_email", contact.email)
+                  .limit(1);
+
+                if (!exclusions || exclusions.length === 0) {
+                  senderEmailId = subgroupEmailId;
+                  break;
+                }
+              }
             }
           }
+        }
+
+        if (!senderEmailId) {
+          senderEmailId = emails[0]?.id || null;
         }
 
         recipientsToCreate.push({
