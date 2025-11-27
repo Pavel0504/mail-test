@@ -308,6 +308,33 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
+    // Создаем запись ping tracking для отслеживания ответов
+    const sentAt = new Date().toISOString();
+    const pingTrackingRes = await fetch(`${supabaseUrl}/rest/v1/mailing_ping_tracking`, {
+      method: "POST",
+      headers: {
+        "apikey": supabaseServiceKey,
+        "Authorization": `Bearer ${supabaseServiceKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+      },
+      body: JSON.stringify({
+        mailing_recipient_id: recipient_id,
+        initial_sent_at: sentAt,
+        response_received: false,
+        ping_sent: false,
+        status: "awaiting_response",
+      }),
+    });
+
+    const pingTrackingData = await pingTrackingRes.json();
+
+    if (pingTrackingRes.ok) {
+      console.log("Ping tracking created:", pingTrackingData);
+    } else {
+      console.error("Failed to create ping tracking:", pingTrackingData);
+    }
+
     return new Response(
       JSON.stringify({ success: true, message: "Email sent successfully" }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
