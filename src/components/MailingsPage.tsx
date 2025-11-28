@@ -1179,6 +1179,14 @@ export function MailingsPage() {
     }
   };
 
+  const hasPartialErrors = (mailing: MailingWithRecipients) => {
+    return (
+      (mailing.status === "sent" || mailing.status === "completed") &&
+      mailing.success_count > 0 &&
+      mailing.failed_count > 0
+    );
+  };
+
   const filteredMailings = mailings.filter((mailing) => {
     if (activeTab === "pending") {
       return mailing.status === "pending" || mailing.status === "sending";
@@ -1278,6 +1286,12 @@ export function MailingsPage() {
                             {mailing.subject || "Без темы"}
                           </h3>
                           {getStatusBadge(mailing.status)}
+                          {hasPartialErrors(mailing) && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+                              <XCircle className="w-3 h-3" />
+                              Есть отправления с ошибкой
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
                           <p>Получателей: {mailing.recipients?.length || 0}</p>
