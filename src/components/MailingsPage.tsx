@@ -186,6 +186,7 @@ export function MailingsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [mailingToEdit, setMailingToEdit] =
     useState<MailingWithRecipients | null>(null);
   const [mailingToDelete, setMailingToDelete] = useState<Mailing | null>(null);
@@ -195,6 +196,14 @@ export function MailingsPage() {
     "pending" | "sent" | "failed" | "ping"
   >("pending");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [duplicateMailings, setDuplicateMailings] = useState<
+    Array<{
+      contact_email: string;
+      contact_name: string;
+      sent_at: string;
+      sender_email: string;
+    }>
+  >([]);
 
   const [newMailing, setNewMailing] = useState({
     subject: "",
@@ -327,6 +336,37 @@ export function MailingsPage() {
     }
   };
 
+  const checkForDuplicateMailings = async (contactIds: string[]) => {
+    if (contactIds.length === 0) return [];
+
+    const { data: existingRecipients } = await supabase
+      .from("mailing_recipients")
+      .select(
+        `
+        id,
+        contact_id,
+        sent_at,
+        contact:contacts(email, name),
+        sender_email:emails(email)
+      `
+      )
+      .in("contact_id", contactIds)
+      .eq("status", "sent");
+
+    if (!existingRecipients || existingRecipients.length === 0) {
+      return [];
+    }
+
+    const duplicates = existingRecipients.map((recipient: any) => ({
+      contact_email: recipient.contact?.email || "",
+      contact_name: recipient.contact?.name || "",
+      sent_at: recipient.sent_at || "",
+      sender_email: recipient.sender_email?.email || "",
+    }));
+
+    return duplicates;
+  };
+
   const handleCreateMailing = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -338,6 +378,51 @@ export function MailingsPage() {
       setError("Выберите хотя бы одного получателя или группу");
       return;
     }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      let allContactIds = [...newMailing.selected_contacts];
+
+      for (const groupId of newMailing.selected_groups) {
+        const { data: groupMembers } = await supabase
+          .from("contact_group_members")
+          .select("contact_id")
+          .eq("group_id", groupId);
+
+        if (groupMembers) {
+          allContactIds.push(...groupMembers.map((m) => m.contact_id));
+        }
+      }
+
+      allContactIds = [...new Set(allContactIds)];
+
+      const finalContacts = allContactIds.filter(
+        (id) => !newMailing.exclude_contacts.includes(id)
+      );
+
+      const duplicates = await checkForDuplicateMailings(finalContacts);
+
+      if (duplicates.length > 0) {
+        setDuplicateMailings(duplicates);
+        setShowDuplicatesModal(true);
+        setLoading(false);
+        return;
+      }
+
+      await proceedWithMailingCreation();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Ошибка при создании рассылки"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const proceedWithMailingCreation = async () => {
+    if (!user) return;
 
     setLoading(true);
     setError("");
@@ -1423,6 +1508,111 @@ export function MailingsPage() {
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded-lg transition-colors"
               >
                 {loading ? "Удаление..." : "Удалить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDuplicatesModal && duplicateMailings.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-red-600 dark:text-red-400">
+                На данные контакты рассылка уже производилась
+              </h2>
+              <button
+                onClick={() => {
+                  setShowDuplicatesModal(false);
+                  setDuplicateMailings([]);
+                }}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-gray-600 dark:text-gray-400 mb-4">
+              Следующие контакты уже получали рассылки ранее:
+            </p>
+
+            <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                        Email
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                        Имя
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                        Дата отправки
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                        Отправитель
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {duplicateMailings.map((duplicate, index) => (
+                      <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                          {duplicate.contact_email}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {duplicate.contact_name || "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {duplicate.sent_at
+                            ? new Date(duplicate.sent_at).toLocaleString("ru-RU")
+                            : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                          {duplicate.sender_email}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDuplicatesModal(false);
+                  setDuplicateMailings([]);
+                  setShowCreateModal(false);
+                  setNewMailing({
+                    subject: "",
+                    text_content: "",
+                    html_content: "",
+                    scheduled_at: "",
+                    scheduled_time: "",
+                    timezone: "UTC",
+                    selected_contacts: [],
+                    selected_groups: [],
+                    exclude_contacts: [],
+                    send_now: false,
+                    subgroup_email_overrides: {},
+                  });
+                }}
+                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              >
+                Отменить рассылку
+              </button>
+              <button
+                onClick={async () => {
+                  setShowDuplicatesModal(false);
+                  setDuplicateMailings([]);
+                  await proceedWithMailingCreation();
+                }}
+                disabled={loading}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+              >
+                {loading ? "Создание..." : "Проигнорировать и продолжить"}
               </button>
             </div>
           </div>
