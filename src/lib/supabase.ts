@@ -88,7 +88,7 @@ export interface ContactGroup {
   ping_subject: string | null;
   ping_text_content: string | null;
   ping_html_content: string | null;
-  ping_delay_days: number;
+  ping_delay_hours: number;
   created_at: string;
   updated_at: string;
 }
@@ -114,4 +114,12 @@ export interface MailingPingTracking {
   status: 'awaiting_response' | 'response_received' | 'ping_sent' | 'no_response';
   created_at: string;
   updated_at: string;
+}
+
+export interface PingSettings {
+  id: string;
+  check_interval_minutes: number;
+  wait_time_hours: number;
+  updated_at: string;
+  updated_by: string | null;
 }

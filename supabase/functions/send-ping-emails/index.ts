@@ -48,12 +48,31 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        // Проверяем прошло ли достаточно времени (по умолчанию 3 дня)
+        // Получаем глобальные настройки пинг-системы
+        const { data: pingSettings } = await fetch(
+          `${supabaseUrl}/rest/v1/ping_settings?select=wait_time_hours&limit=1`,
+          {
+            headers: {
+              "apikey": supabaseServiceKey,
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+            },
+          }
+        ).then(r => r.json()).then(d => ({ data: d[0] }));
+
+        const waitTimeHours = pingSettings?.wait_time_hours || 10;
+
+        // Проверяем прошло ли достаточно времени
         const initialSentAt = new Date(tracking.initial_sent_at);
         const now = new Date();
-        const daysPassed = (now.getTime() - initialSentAt.getTime()) / (1000 * 60 * 60 * 24);
+        const hoursPassed = (now.getTime() - initialSentAt.getTime()) / (1000 * 60 * 60);
 
-        // Получаем настройки из группы контакта (если есть)
+        // Если время еще не пришло - пропускаем
+        if (hoursPassed < waitTimeHours) {
+          skippedCount++;
+          continue;
+        }
+
+        // Получаем настройки контента из группы контакта (если есть)
         const { data: groupMemberships } = await fetch(
           `${supabaseUrl}/rest/v1/contact_group_members?contact_id=eq.${contact.id}&select=group_id`,
           {
@@ -64,7 +83,6 @@ Deno.serve(async (req: Request) => {
           }
         ).then(r => r.json());
 
-        let pingDelayDays = 3;
         let pingSubject = "Follow-up";
         let pingTextContent = "";
         let pingHtmlContent = "";
@@ -72,7 +90,7 @@ Deno.serve(async (req: Request) => {
         if (groupMemberships && groupMemberships.length > 0) {
           const groupId = groupMemberships[0].group_id;
           const { data: group } = await fetch(
-            `${supabaseUrl}/rest/v1/contact_groups?id=eq.${groupId}&select=ping_delay_days,ping_subject,ping_text_content,ping_html_content`,
+            `${supabaseUrl}/rest/v1/contact_groups?id=eq.${groupId}&select=ping_subject,ping_text_content,ping_html_content`,
             {
               headers: {
                 "apikey": supabaseServiceKey,
@@ -82,17 +100,10 @@ Deno.serve(async (req: Request) => {
           ).then(r => r.json()).then(d => ({ data: d[0] }));
 
           if (group) {
-            pingDelayDays = group.ping_delay_days || 3;
             pingSubject = group.ping_subject || "Follow-up";
             pingTextContent = group.ping_text_content || "";
             pingHtmlContent = group.ping_html_content || "";
           }
-        }
-
-        // Если время еще не пришло - пропускаем
-        if (daysPassed < pingDelayDays) {
-          skippedCount++;
-          continue;
         }
 
         // Заменяем [NAME] на имя контакта

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Mail, Clock, CheckCircle, Send, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { supabase, MailingPingTracking, Mailing, Contact } from '../lib/supabase';
+import { Mail, Clock, CheckCircle, Send, XCircle, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import { supabase, MailingPingTracking, Mailing, Contact, PingSettings } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
 interface PingTrackingWithDetails extends MailingPingTracking {
@@ -18,10 +18,19 @@ export function MailingsPingPage() {
   const [pingTrackings, setPingTrackings] = useState<PingTrackingWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [pingSettings, setPingSettings] = useState<PingSettings | null>(null);
+  const [settingsForm, setSettingsForm] = useState({
+    check_interval_minutes: 30,
+    wait_time_hours: 10,
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
 
   useEffect(() => {
     if (user) {
       loadPingTrackings();
+      loadPingSettings();
       const interval = setInterval(loadPingTrackings, 5000);
       return () => clearInterval(interval);
     }
@@ -51,6 +60,66 @@ export function MailingsPingPage() {
     }
 
     setLoading(false);
+  };
+
+  const loadPingSettings = async () => {
+    const { data } = await supabase
+      .from('ping_settings')
+      .select('*')
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      setPingSettings(data);
+      setSettingsForm({
+        check_interval_minutes: data.check_interval_minutes,
+        wait_time_hours: data.wait_time_hours,
+      });
+    }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setSettingsLoading(true);
+    setSettingsError('');
+
+    try {
+      if (settingsForm.check_interval_minutes < 1) {
+        throw new Error('Интервал проверки должен быть больше 0 минут');
+      }
+      if (settingsForm.wait_time_hours < 1) {
+        throw new Error('Время ожидания должно быть больше 0 часов');
+      }
+
+      const { error } = await supabase
+        .from('ping_settings')
+        .update({
+          check_interval_minutes: settingsForm.check_interval_minutes,
+          wait_time_hours: settingsForm.wait_time_hours,
+          updated_at: new Date().toISOString(),
+          updated_by: user.id,
+        })
+        .eq('id', pingSettings?.id);
+
+      if (error) throw error;
+
+      await supabase.from('activity_logs').insert({
+        user_id: user.id,
+        action_type: 'update',
+        entity_type: 'ping_settings',
+        entity_id: pingSettings?.id,
+        details: settingsForm,
+      });
+
+      setShowSettingsModal(false);
+      loadPingSettings();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : 'Ошибка при сохранении настроек');
+    } finally {
+      setSettingsLoading(false);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -115,11 +184,22 @@ export function MailingsPingPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Отслеживание ответов</h2>
-        <p className="text-gray-600 dark:text-gray-400">
-          Мониторинг получения ответов и автоматическая отправка пинг-писем
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Отслеживание ответов</h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            Мониторинг получения ответов и автоматическая отправка пинг-писем
+          </p>
+        </div>
+        {user?.role === 'admin' && (
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          >
+            <Settings className="w-5 h-5" />
+            Настройки
+          </button>
+        )}
       </div>
 
       {pingTrackings.length === 0 ? (
@@ -274,6 +354,76 @@ export function MailingsPingPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Настройки отслеживания</h2>
+
+            {settingsError && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-600 dark:text-red-400">{settingsError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveSettings} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Интервал проверки ответов (минуты)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={settingsForm.check_interval_minutes}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, check_interval_minutes: parseInt(e.target.value) || 1 })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  required
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Как часто проверять наличие ответов от получателей
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Время ожидания ответа (часы)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={settingsForm.wait_time_hours}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, wait_time_hours: parseInt(e.target.value) || 1 })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  required
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Через сколько часов отправлять пинг-письмо, если нет ответа
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsModal(false);
+                    setSettingsError('');
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Отменить
+                </button>
+                <button
+                  type="submit"
+                  disabled={settingsLoading}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+                >
+                  {settingsLoading ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
