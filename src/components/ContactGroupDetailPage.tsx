@@ -626,11 +626,24 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     if (!user) return;
 
     try {
+      // Удаляем контакт из текущей группы
       await supabase
         .from('contact_group_members')
         .delete()
         .eq('group_id', groupId)
         .eq('contact_id', contactId);
+
+      // Проверяем, есть ли контакт в других группах
+      const { data: otherMemberships } = await supabase
+        .from('contact_group_members')
+        .select('id')
+        .eq('contact_id', contactId);
+
+      // Если контакта больше нет ни в одной группе - удаляем его полностью
+      if (!otherMemberships || otherMemberships.length === 0) {
+        await supabase.from('contact_history').delete().eq('contact_id', contactId);
+        await supabase.from('contacts').delete().eq('id', contactId);
+      }
 
       await supabase.from('activity_logs').insert({
         user_id: user.id,
