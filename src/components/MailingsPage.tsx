@@ -12,6 +12,7 @@ import {
   Edit2,
   FolderOpen,
   ChevronDown,
+  Users,
 } from "lucide-react";
 import {
   supabase,
@@ -28,9 +29,15 @@ interface GroupWithSubgroupsProps {
   isSelected: boolean;
   isExpanded: boolean;
   emails: Email[];
+  selectedSubgroups: string[];
+  selectedContacts: string[];
   subgroupEmailOverrides: Record<string, string>;
+  expandedSubgroups: Set<string>;
   onToggle: () => void;
   onCheckChange: (checked: boolean) => void;
+  onSubgroupCheck: (subgroupId: string, checked: boolean) => void;
+  onContactCheck: (contactId: string, checked: boolean) => void;
+  onSubgroupToggle: (subgroupId: string) => void;
   onEmailOverride: (subgroupId: string, emailId: string) => void;
 }
 
@@ -39,13 +46,21 @@ function GroupWithSubgroups({
   isSelected,
   isExpanded,
   emails,
+  selectedSubgroups,
+  selectedContacts,
   subgroupEmailOverrides,
+  expandedSubgroups,
   onToggle,
   onCheckChange,
+  onSubgroupCheck,
+  onContactCheck,
+  onSubgroupToggle,
   onEmailOverride,
 }: GroupWithSubgroupsProps) {
   const [subgroups, setSubgroups] = useState<ContactGroup[]>([]);
   const [loadingSubgroups, setLoadingSubgroups] = useState(false);
+  const [subgroupContacts, setSubgroupContacts] = useState<Record<string, Contact[]>>({});
+  const [loadingContacts, setLoadingContacts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (isExpanded && subgroups.length === 0) {
@@ -66,6 +81,42 @@ function GroupWithSubgroups({
     }
     setLoadingSubgroups(false);
   };
+
+  const loadSubgroupContacts = async (subgroupId: string) => {
+    if (subgroupContacts[subgroupId]) return;
+
+    setLoadingContacts({ ...loadingContacts, [subgroupId]: true });
+
+    const { data: members } = await supabase
+      .from("contact_group_members")
+      .select("contact_id")
+      .eq("group_id", subgroupId);
+
+    if (members && members.length > 0) {
+      const contactIds = members.map(m => m.contact_id);
+      const { data: contacts } = await supabase
+        .from("contacts")
+        .select("*")
+        .in("id", contactIds)
+        .order("email", { ascending: true });
+
+      if (contacts) {
+        setSubgroupContacts({ ...subgroupContacts, [subgroupId]: contacts });
+      }
+    } else {
+      setSubgroupContacts({ ...subgroupContacts, [subgroupId]: [] });
+    }
+
+    setLoadingContacts({ ...loadingContacts, [subgroupId]: false });
+  };
+
+  useEffect(() => {
+    expandedSubgroups.forEach(subgroupId => {
+      if (subgroups.find(s => s.id === subgroupId)) {
+        loadSubgroupContacts(subgroupId);
+      }
+    });
+  }, [expandedSubgroups, subgroups]);
 
   return (
     <div className="border border-gray-300 dark:border-gray-600 rounded-lg">
@@ -106,34 +157,99 @@ function GroupWithSubgroups({
               Нет подгрупп
             </p>
           ) : (
-            subgroups.map((subgroup) => (
-              <div
-                key={subgroup.id}
-                className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600"
-              >
-                <FolderOpen className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-900 dark:text-white flex-1">
-                  {subgroup.name}
-                </span>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                    Почта для рассылки:
-                  </label>
-                  <select
-                    value={subgroupEmailOverrides[subgroup.id] || ""}
-                    onChange={(e) => onEmailOverride(subgroup.id, e.target.value)}
-                    className="px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white min-w-[200px]"
-                  >
-                    <option value="">По умолчанию</option>
-                    {emails.map((email) => (
-                      <option key={email.id} value={email.id}>
-                        {email.email}
-                      </option>
-                    ))}
-                  </select>
+            subgroups.map((subgroup) => {
+              const isSubgroupExpanded = expandedSubgroups.has(subgroup.id);
+              const contacts = subgroupContacts[subgroup.id] || [];
+              const isLoadingContacts = loadingContacts[subgroup.id];
+
+              return (
+                <div
+                  key={subgroup.id}
+                  className="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden"
+                >
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/30">
+                    <input
+                      type="checkbox"
+                      checked={selectedSubgroups.includes(subgroup.id)}
+                      onChange={(e) => onSubgroupCheck(subgroup.id, e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onSubgroupToggle(subgroup.id)}
+                      className="flex items-center gap-2 text-left flex-1"
+                    >
+                      <ChevronDown
+                        className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform ${
+                          isSubgroupExpanded ? "" : "-rotate-90"
+                        }`}
+                      />
+                      <FolderOpen className="w-4 h-4 text-green-600 dark:text-green-400" />
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {subgroup.name}
+                      </span>
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                        Почта:
+                      </label>
+                      <select
+                        value={subgroupEmailOverrides[subgroup.id] || ""}
+                        onChange={(e) => onEmailOverride(subgroup.id, e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white min-w-[180px]"
+                      >
+                        <option value="">По умолчанию</option>
+                        {emails.map((email) => (
+                          <option key={email.id} value={email.id}>
+                            {email.email}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {isSubgroupExpanded && (
+                    <div className="border-t border-gray-200 dark:border-gray-600 p-3 bg-white dark:bg-gray-800">
+                      {isLoadingContacts ? (
+                        <div className="flex items-center justify-center py-4">
+                          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      ) : contacts.length === 0 ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                          Нет контактов в подгруппе
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {contacts.map((contact) => (
+                            <label
+                              key={contact.id}
+                              className="flex items-center gap-2 p-2 hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedContacts.includes(contact.id)}
+                                onChange={(e) => onContactCheck(contact.id, e.target.checked)}
+                                className="w-3.5 h-3.5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+                              />
+                              <Users className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                              <span className="text-xs text-gray-700 dark:text-gray-300 flex-1">
+                                {contact.email}
+                                {contact.name && (
+                                  <span className="text-gray-500 dark:text-gray-400 ml-1">
+                                    ({contact.name})
+                                  </span>
+                                )}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -196,6 +312,9 @@ export function MailingsPage() {
     "pending" | "sent" | "failed" | "ping"
   >("pending");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [selectedSubgroups, setSelectedSubgroups] = useState<string[]>([]);
+  const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+  const [expandedSubgroups, setExpandedSubgroups] = useState<Set<string>>(new Set());
   const [duplicateMailings, setDuplicateMailings] = useState<
     Array<{
       contact_email: string;
@@ -372,8 +491,9 @@ export function MailingsPage() {
     if (!user) return;
 
     if (
-      newMailing.selected_contacts.length === 0 &&
-      newMailing.selected_groups.length === 0
+      selectedContacts.length === 0 &&
+      newMailing.selected_groups.length === 0 &&
+      selectedSubgroups.length === 0
     ) {
       setError("Выберите хотя бы одного получателя или группу");
       return;
@@ -383,7 +503,7 @@ export function MailingsPage() {
     setError("");
 
     try {
-      let allContactIds = [...newMailing.selected_contacts];
+      let allContactIds = [...selectedContacts];
 
       for (const groupId of newMailing.selected_groups) {
         const { data: groupMembers } = await supabase
@@ -393,6 +513,17 @@ export function MailingsPage() {
 
         if (groupMembers) {
           allContactIds.push(...groupMembers.map((m) => m.contact_id));
+        }
+      }
+
+      for (const subgroupId of selectedSubgroups) {
+        const { data: subgroupMembers } = await supabase
+          .from("contact_group_members")
+          .select("contact_id")
+          .eq("group_id", subgroupId);
+
+        if (subgroupMembers) {
+          allContactIds.push(...subgroupMembers.map((m) => m.contact_id));
         }
       }
 
@@ -627,6 +758,10 @@ export function MailingsPage() {
         send_now: false,
         subgroup_email_overrides: {},
       });
+      setSelectedSubgroups([]);
+      setSelectedContacts([]);
+      setExpandedSubgroups(new Set());
+      setExpandedGroups(new Set());
       setShowCreateModal(false);
       loadMailings();
     } catch (err) {
@@ -643,8 +778,9 @@ export function MailingsPage() {
     if (!user || !mailingToEdit) return;
 
     if (
-      newMailing.selected_contacts.length === 0 &&
-      newMailing.selected_groups.length === 0
+      selectedContacts.length === 0 &&
+      newMailing.selected_groups.length === 0 &&
+      selectedSubgroups.length === 0
     ) {
       setError("Выберите хотя бы одного получателя или группу");
       return;
@@ -1137,7 +1273,10 @@ export function MailingsPage() {
                         isSelected={newMailing.selected_groups.includes(group.id)}
                         isExpanded={expandedGroups.has(group.id)}
                         emails={emails}
+                        selectedSubgroups={selectedSubgroups}
+                        selectedContacts={selectedContacts}
                         subgroupEmailOverrides={newMailing.subgroup_email_overrides}
+                        expandedSubgroups={expandedSubgroups}
                         onToggle={() => {
                           const newExpanded = new Set(expandedGroups);
                           if (expandedGroups.has(group.id)) {
@@ -1162,6 +1301,29 @@ export function MailingsPage() {
                             });
                           }
                         }}
+                        onSubgroupCheck={(subgroupId, checked) => {
+                          if (checked) {
+                            setSelectedSubgroups([...selectedSubgroups, subgroupId]);
+                          } else {
+                            setSelectedSubgroups(selectedSubgroups.filter(id => id !== subgroupId));
+                          }
+                        }}
+                        onContactCheck={(contactId, checked) => {
+                          if (checked) {
+                            setSelectedContacts([...selectedContacts, contactId]);
+                          } else {
+                            setSelectedContacts(selectedContacts.filter(id => id !== contactId));
+                          }
+                        }}
+                        onSubgroupToggle={(subgroupId) => {
+                          const newExpanded = new Set(expandedSubgroups);
+                          if (expandedSubgroups.has(subgroupId)) {
+                            newExpanded.delete(subgroupId);
+                          } else {
+                            newExpanded.add(subgroupId);
+                          }
+                          setExpandedSubgroups(newExpanded);
+                        }}
                         onEmailOverride={(subgroupId, emailId) => {
                           setNewMailing({
                             ...newMailing,
@@ -1177,78 +1339,6 @@ export function MailingsPage() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Выбор контактов
-                </label>
-                <div className="border border-gray-300 dark:border-gray-600 rounded-lg p-4 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-700">
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={
-                          newMailing.selected_contacts.length ===
-                          contacts.length
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setNewMailing({
-                              ...newMailing,
-                              selected_contacts: contacts.map((c) => c.id),
-                            });
-                          } else {
-                            setNewMailing({
-                              ...newMailing,
-                              selected_contacts: [],
-                            });
-                          }
-                        }}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                      />
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">
-                        Выбрать всех
-                      </span>
-                    </label>
-                    <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
-                    {contacts.map((contact) => (
-                      <label
-                        key={contact.id}
-                        className="flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={newMailing.selected_contacts.includes(
-                            contact.id
-                          )}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewMailing({
-                                ...newMailing,
-                                selected_contacts: [
-                                  ...newMailing.selected_contacts,
-                                  contact.id,
-                                ],
-                              });
-                            } else {
-                              setNewMailing({
-                                ...newMailing,
-                                selected_contacts:
-                                  newMailing.selected_contacts.filter(
-                                    (id) => id !== contact.id
-                                  ),
-                              });
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">
-                          {contact.email} {contact.name && `(${contact.name})`}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
 
               <div className="flex items-center gap-3">
                 <input
@@ -1344,6 +1434,10 @@ export function MailingsPage() {
                       send_now: false,
                       subgroup_email_overrides: {},
                     });
+                    setSelectedSubgroups([]);
+                    setSelectedContacts([]);
+                    setExpandedSubgroups(new Set());
+                    setExpandedGroups(new Set());
                     setError("");
                   }}
                   className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
@@ -1598,6 +1692,10 @@ export function MailingsPage() {
                     send_now: false,
                     subgroup_email_overrides: {},
                   });
+                  setSelectedSubgroups([]);
+                  setSelectedContacts([]);
+                  setExpandedSubgroups(new Set());
+                  setExpandedGroups(new Set());
                 }}
                 className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
               >
