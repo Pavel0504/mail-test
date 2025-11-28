@@ -37,7 +37,9 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [showEditContactModal, setShowEditContactModal] = useState(false);
   const [duplicates, setDuplicates] = useState<DuplicateContact[]>([]);
+  const [contactToEdit, setContactToEdit] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -66,6 +68,13 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     ping_subject: '',
     ping_text_content: '',
     ping_html_content: '',
+  });
+
+  const [editContactForm, setEditContactForm] = useState({
+    email: '',
+    name: '',
+    link: '',
+    default_sender_email_id: '',
   });
 
   useEffect(() => {
@@ -637,6 +646,60 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     }
   };
 
+  const handleEditContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactToEdit || !user) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const changedFields: Record<string, unknown> = {};
+      if (editContactForm.email !== contactToEdit.email) changedFields.email = editContactForm.email;
+      if (editContactForm.name !== contactToEdit.name) changedFields.name = editContactForm.name;
+      if (editContactForm.link !== contactToEdit.link) changedFields.link = editContactForm.link;
+      if (editContactForm.default_sender_email_id !== (contactToEdit.default_sender_email_id || '')) {
+        changedFields.default_sender_email_id = editContactForm.default_sender_email_id || null;
+      }
+
+      await supabase
+        .from('contacts')
+        .update({
+          email: editContactForm.email,
+          name: editContactForm.name,
+          link: editContactForm.link,
+          default_sender_email_id: editContactForm.default_sender_email_id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', contactToEdit.id);
+
+      if (Object.keys(changedFields).length > 0) {
+        await supabase.from('contact_history').insert({
+          contact_id: contactToEdit.id,
+          action_type: 'update',
+          changed_fields: changedFields,
+          changed_by: user.id,
+        });
+      }
+
+      await supabase.from('activity_logs').insert({
+        user_id: user.id,
+        action_type: 'update',
+        entity_type: 'contact',
+        entity_id: contactToEdit.id,
+        details: { changes: changedFields, group_id: groupId },
+      });
+
+      setShowEditContactModal(false);
+      setContactToEdit(null);
+      loadGroupData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка при редактировании контакта');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     type: 'text' | 'html',
@@ -811,13 +874,31 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
                           <p className="text-xs text-gray-600 dark:text-gray-400">Имя: {contact.name}</p>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleRemoveContact(contact.id)}
-                        className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                        title="Удалить"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setContactToEdit(contact);
+                            setEditContactForm({
+                              email: contact.email,
+                              name: contact.name,
+                              link: contact.link,
+                              default_sender_email_id: contact.default_sender_email_id || '',
+                            });
+                            setShowEditContactModal(true);
+                          }}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                          title="Редактировать"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleRemoveContact(contact.id)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                          title="Удалить"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1541,6 +1622,100 @@ email@example.com{'\n'}https://example.com{'\n'}Имя контакта{'\n'}{'\
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {showEditContactModal && contactToEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Редактировать контакт</h2>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleEditContact} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Email <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={editContactForm.email}
+                  onChange={(e) => setEditContactForm({ ...editContactForm, email: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Имя <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editContactForm.name}
+                  onChange={(e) => setEditContactForm({ ...editContactForm, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Ссылка <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="url"
+                  value={editContactForm.link}
+                  onChange={(e) => setEditContactForm({ ...editContactForm, link: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Почта по умолчанию
+                </label>
+                <select
+                  value={editContactForm.default_sender_email_id}
+                  onChange={(e) => setEditContactForm({ ...editContactForm, default_sender_email_id: e.target.value })}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
+                >
+                  <option value="">Не выбрано</option>
+                  {emails.map((email) => (
+                    <option key={email.id} value={email.id}>
+                      {email.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditContactModal(false);
+                    setContactToEdit(null);
+                    setError('');
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Отменить
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+                >
+                  {loading ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
