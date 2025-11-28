@@ -593,56 +593,7 @@ export function MailingsPage() {
         scheduledAt = new Date(dateTime).toISOString();
       }
 
-      // Загружаем контент из первой выбранной подгруппы
-      let mailingSubject = "";
-      let mailingTextContent = null;
-      let mailingHtmlContent = null;
-
-      // Приоритет: подгруппа -> группа
-      if (selectedSubgroups.length > 0) {
-        // Берем контент из первой выбранной подгруппы
-        const { data: firstSubgroup } = await supabase
-          .from("contact_groups")
-          .select("*")
-          .eq("id", selectedSubgroups[0])
-          .single();
-
-        if (firstSubgroup) {
-          mailingSubject = firstSubgroup.default_subject || "";
-          mailingTextContent = firstSubgroup.default_text_content || null;
-          mailingHtmlContent = firstSubgroup.default_html_content || null;
-        }
-      } else if (newMailing.selected_groups.length > 0) {
-        // Если не выбрана подгруппа, но выбрана группа - берем из первой подгруппы этой группы
-        const { data: firstGroup } = await supabase
-          .from("contact_groups")
-          .select("*")
-          .eq("id", newMailing.selected_groups[0])
-          .single();
-
-        if (firstGroup) {
-          // Загружаем контент из первой подгруппы
-          const { data: subgroups } = await supabase
-            .from("contact_groups")
-            .select("*")
-            .eq("parent_group_id", firstGroup.id)
-            .limit(1);
-
-          if (subgroups && subgroups.length > 0) {
-            const subgroup = subgroups[0];
-            mailingSubject = subgroup.default_subject || "";
-            mailingTextContent = subgroup.default_text_content || null;
-            mailingHtmlContent = subgroup.default_html_content || null;
-          } else {
-            // Если нет подгрупп, используем контент родительской группы
-            mailingSubject = firstGroup.default_subject || "";
-            mailingTextContent = firstGroup.default_text_content || null;
-            mailingHtmlContent = firstGroup.default_html_content || null;
-          }
-        }
-      }
-
-      // Собираем контакты по той же логике, что и в handleCreateMailing
+      // Собираем контакты для определения их подгрупп
       let allContactIds: string[] = [];
 
       // Если выбраны группы - собираем контакты из всех подгрупп
@@ -689,6 +640,81 @@ export function MailingsPage() {
         (id) => !newMailing.exclude_contacts.includes(id)
       );
 
+      // Определяем подгруппы для каждого контакта и собираем уникальные подгруппы
+      const contactSubgroupMap: Record<string, string[]> = {};
+      const allSubgroupsUsed = new Set<string>();
+
+      for (const contactId of finalContacts) {
+        const { data: memberships } = await supabase
+          .from("contact_group_members")
+          .select("group_id")
+          .eq("contact_id", contactId);
+
+        if (memberships && memberships.length > 0) {
+          contactSubgroupMap[contactId] = memberships.map(m => m.group_id);
+          memberships.forEach(m => allSubgroupsUsed.add(m.group_id));
+        }
+      }
+
+      // Загружаем данные всех используемых подгрупп
+      const subgroupsData: Record<string, any> = {};
+      if (allSubgroupsUsed.size > 0) {
+        const { data: subgroupsList } = await supabase
+          .from("contact_groups")
+          .select("*")
+          .in("id", Array.from(allSubgroupsUsed));
+
+        if (subgroupsList) {
+          subgroupsList.forEach(sg => {
+            subgroupsData[sg.id] = sg;
+          });
+        }
+      }
+
+      // Выбираем контент для рассылки
+      // Приоритет: если выбраны подгруппы - берем из первой, иначе из первой подгруппы группы, иначе из контактов
+      let mailingSubject = "";
+      let mailingTextContent = null;
+      let mailingHtmlContent = null;
+
+      if (selectedSubgroups.length > 0) {
+        // Берем контент из первой выбранной подгруппы
+        const firstSubgroupData = subgroupsData[selectedSubgroups[0]];
+        if (firstSubgroupData) {
+          mailingSubject = firstSubgroupData.default_subject || "";
+          mailingTextContent = firstSubgroupData.default_text_content || null;
+          mailingHtmlContent = firstSubgroupData.default_html_content || null;
+        }
+      } else if (newMailing.selected_groups.length > 0) {
+        // Берем из первой подгруппы выбранной группы
+        const { data: firstGroupSubgroups } = await supabase
+          .from("contact_groups")
+          .select("*")
+          .eq("parent_group_id", newMailing.selected_groups[0])
+          .limit(1);
+
+        if (firstGroupSubgroups && firstGroupSubgroups.length > 0) {
+          const subgroup = firstGroupSubgroups[0];
+          mailingSubject = subgroup.default_subject || "";
+          mailingTextContent = subgroup.default_text_content || null;
+          mailingHtmlContent = subgroup.default_html_content || null;
+        }
+      } else if (finalContacts.length > 0) {
+        // Если выбраны только контакты без подгрупп, берем контент из подгруппы первого контакта
+        const firstContactId = finalContacts[0];
+        const subgroupIds = contactSubgroupMap[firstContactId];
+        if (subgroupIds && subgroupIds.length > 0) {
+          const firstSubgroupData = subgroupsData[subgroupIds[0]];
+          if (firstSubgroupData) {
+            mailingSubject = firstSubgroupData.default_subject || "";
+            mailingTextContent = firstSubgroupData.default_text_content || null;
+            mailingHtmlContent = firstSubgroupData.default_html_content || null;
+          }
+        }
+      }
+
+      // finalContacts уже определены выше при загрузке контента
+
       const { data: mainMailing } = await supabase
         .from("mailings")
         .insert({
@@ -713,6 +739,7 @@ export function MailingsPage() {
       const recipientsToCreate = [];
       const groupEmailMap: Record<string, string> = {};
 
+      // Собираем email overrides для всех подгрупп
       for (const groupId of newMailing.selected_groups) {
         const { data: subgroups } = await supabase
           .from("contact_groups")
@@ -729,40 +756,63 @@ export function MailingsPage() {
         }
       }
 
+      // Добавляем overrides для явно выбранных подгрупп
+      for (const subgroupId of selectedSubgroups) {
+        const emailOverride = newMailing.subgroup_email_overrides[subgroupId];
+        if (emailOverride) {
+          groupEmailMap[subgroupId] = emailOverride;
+        }
+      }
+
+      // Загружаем все подгруппы с их default_sender_email_id
+      if (allSubgroupsUsed.size > 0) {
+        const { data: subgroupsList } = await supabase
+          .from("contact_groups")
+          .select("id, default_sender_email_id")
+          .in("id", Array.from(allSubgroupsUsed));
+
+        if (subgroupsList) {
+          subgroupsList.forEach(sg => {
+            if (sg.default_sender_email_id && !groupEmailMap[sg.id]) {
+              groupEmailMap[sg.id] = sg.default_sender_email_id;
+            }
+          });
+        }
+      }
+
       for (const contactId of finalContacts) {
         const contact = contacts.find((c) => c.id === contactId);
         if (!contact) continue;
 
         let senderEmailId = null;
 
+        // Приоритет 1: default_sender_email_id контакта
         if (contact.default_sender_email_id) {
           senderEmailId = contact.default_sender_email_id;
         } else {
-          const { data: memberships } = await supabase
-            .from("contact_group_members")
-            .select("group_id")
-            .eq("contact_id", contactId);
+          // Приоритет 2: email override подгруппы
+          const contactSubgroups = contactSubgroupMap[contactId] || [];
 
-          if (memberships && memberships.length > 0) {
-            for (const membership of memberships) {
-              const subgroupEmailId = groupEmailMap[membership.group_id];
-              if (subgroupEmailId) {
-                const { data: exclusions } = await supabase
-                  .from("contact_exclusions")
-                  .select("id")
-                  .eq("email_id", subgroupEmailId)
-                  .eq("contact_email", contact.email)
-                  .limit(1);
+          for (const subgroupId of contactSubgroups) {
+            const subgroupEmailId = groupEmailMap[subgroupId];
+            if (subgroupEmailId) {
+              // Проверяем исключения
+              const { data: exclusions } = await supabase
+                .from("contact_exclusions")
+                .select("id")
+                .eq("email_id", subgroupEmailId)
+                .eq("contact_email", contact.email)
+                .limit(1);
 
-                if (!exclusions || exclusions.length === 0) {
-                  senderEmailId = subgroupEmailId;
-                  break;
-                }
+              if (!exclusions || exclusions.length === 0) {
+                senderEmailId = subgroupEmailId;
+                break;
               }
             }
           }
         }
 
+        // Приоритет 3: первая доступная почта пользователя
         if (!senderEmailId) {
           senderEmailId = emails[0]?.id || null;
         }
@@ -1359,7 +1409,38 @@ export function MailingsPage() {
                               ...newMailing,
                               selected_groups: [...newMailing.selected_groups, group.id],
                             });
-                            // Снимаем галочки с подгрупп этой группы, т.к. группа выбрана целиком
+                            // Выбираем все подгруппы и контакты этой группы
+                            const { data: subgroups } = await supabase
+                              .from("contact_groups")
+                              .select("id")
+                              .eq("parent_group_id", group.id);
+
+                            if (subgroups && subgroups.length > 0) {
+                              const subgroupIds = subgroups.map(s => s.id);
+                              setSelectedSubgroups([...new Set([...selectedSubgroups, ...subgroupIds])]);
+
+                              // Загружаем и выбираем все контакты из всех подгрупп
+                              const allContactIds: string[] = [];
+                              for (const subgroup of subgroups) {
+                                const { data: members } = await supabase
+                                  .from("contact_group_members")
+                                  .select("contact_id")
+                                  .eq("group_id", subgroup.id);
+                                if (members) {
+                                  allContactIds.push(...members.map(m => m.contact_id));
+                                }
+                              }
+                              setSelectedContacts([...new Set([...selectedContacts, ...allContactIds])]);
+                            }
+                          } else {
+                            // Снимаем выбор с группы
+                            setNewMailing({
+                              ...newMailing,
+                              selected_groups: newMailing.selected_groups.filter(
+                                (id) => id !== group.id
+                              ),
+                            });
+                            // Снимаем выбор со всех подгрупп этой группы
                             const { data: subgroups } = await supabase
                               .from("contact_groups")
                               .select("id")
@@ -1368,17 +1449,23 @@ export function MailingsPage() {
                             if (subgroups) {
                               const subgroupIds = subgroups.map(s => s.id);
                               setSelectedSubgroups(selectedSubgroups.filter(id => !subgroupIds.includes(id)));
+
+                              // Снимаем выбор со всех контактов из этих подгрупп
+                              const allContactIds: string[] = [];
+                              for (const subgroup of subgroups) {
+                                const { data: members } = await supabase
+                                  .from("contact_group_members")
+                                  .select("contact_id")
+                                  .eq("group_id", subgroup.id);
+                                if (members) {
+                                  allContactIds.push(...members.map(m => m.contact_id));
+                                }
+                              }
+                              setSelectedContacts(selectedContacts.filter(id => !allContactIds.includes(id)));
                             }
-                          } else {
-                            setNewMailing({
-                              ...newMailing,
-                              selected_groups: newMailing.selected_groups.filter(
-                                (id) => id !== group.id
-                              ),
-                            });
                           }
                         }}
-                        onSubgroupCheck={(subgroupId, checked) => {
+                        onSubgroupCheck={async (subgroupId, checked) => {
                           if (checked) {
                             setSelectedSubgroups([...selectedSubgroups, subgroupId]);
                             // Снимаем галочку с родительской группы
@@ -1388,8 +1475,26 @@ export function MailingsPage() {
                                 (id) => id !== group.id
                               ),
                             });
+                            // Выбираем все контакты этой подгруппы
+                            const { data: members } = await supabase
+                              .from("contact_group_members")
+                              .select("contact_id")
+                              .eq("group_id", subgroupId);
+                            if (members) {
+                              const contactIds = members.map(m => m.contact_id);
+                              setSelectedContacts([...new Set([...selectedContacts, ...contactIds])]);
+                            }
                           } else {
                             setSelectedSubgroups(selectedSubgroups.filter(id => id !== subgroupId));
+                            // Снимаем выбор со всех контактов этой подгруппы
+                            const { data: members } = await supabase
+                              .from("contact_group_members")
+                              .select("contact_id")
+                              .eq("group_id", subgroupId);
+                            if (members) {
+                              const contactIds = members.map(m => m.contact_id);
+                              setSelectedContacts(selectedContacts.filter(id => !contactIds.includes(id)));
+                            }
                           }
                         }}
                         onContactCheck={(contactId, checked) => {
