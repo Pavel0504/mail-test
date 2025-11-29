@@ -346,7 +346,7 @@ export function MailingsPage() {
     loadGroups();
     loadEmails();
 
-    // Подписка только на таблицу mailings, фильтруем по user_id — это уменьшит количество пробуждений
+    // Подписка только на таблицу mailings для получения уведомлений о создании/изменении
     const mailingsChannel = supabase
       .channel("mailings-changes")
       .on(
@@ -357,22 +357,31 @@ export function MailingsPage() {
           table: "mailings",
           filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
-          // payload может быть использован для частичного обновления, но для простоты — перезагрузим список
+        () => {
           loadMailings();
         }
       )
       .subscribe();
 
-    // УБРАЛИ подписку на mailing_recipients и убрали aggressive polling (setInterval)
-    // Если нужен периодический refresh — можно поставить редкий interval, например 10s:
-    // const interval = setInterval(() => loadMailings(), 10000);
+    // Умная проверка статусов рассылок каждые 5 секунд
+    // Запускается только когда есть активные рассылки в статусе "sending"
+    const checkInterval = setInterval(() => {
+      // Проверяем, есть ли рассылки в статусе "sending"
+      const hasActiveSending = mailings.some(
+        (m) => m.status === "sending"
+      );
+
+      if (hasActiveSending) {
+        // Если есть активные рассылки - обновляем данные
+        loadMailings();
+      }
+    }, 5000); // 5 секунд
 
     return () => {
       mailingsChannel.unsubscribe();
-      // clearInterval(interval); // если включили интервал
+      clearInterval(checkInterval);
     };
-  }, [user]);
+  }, [user, mailings]);
 
   const loadMailings = async () => {
     if (!user) return;
