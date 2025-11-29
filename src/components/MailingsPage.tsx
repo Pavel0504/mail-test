@@ -1574,7 +1574,7 @@ export function MailingsPage() {
                             }
                           }
                         }}
-                        onContactCheck={(contactId, checked) => {
+                        onContactCheck={async (contactId, checked) => {
                           if (checked) {
                             // Добавляем контакт в выбранные
                             setSelectedContacts([...selectedContacts, contactId]);
@@ -1585,6 +1585,32 @@ export function MailingsPage() {
                                 (id) => id !== contactId
                               ),
                             });
+
+                            // Находим подгруппы, в которых находится этот контакт
+                            const { data: memberships } = await supabase
+                              .from("contact_group_members")
+                              .select("group_id")
+                              .eq("contact_id", contactId);
+
+                            if (memberships && memberships.length > 0) {
+                              // Проверяем какие из подгрупп принадлежат текущей группе
+                              const { data: subgroups } = await supabase
+                                .from("contact_groups")
+                                .select("id")
+                                .eq("parent_group_id", group.id);
+
+                              if (subgroups) {
+                                const subgroupIds = subgroups.map(s => s.id);
+                                // Добавляем подгруппы контакта в выбранные, если они принадлежат текущей группе
+                                const contactSubgroups = memberships
+                                  .map(m => m.group_id)
+                                  .filter(id => subgroupIds.includes(id));
+
+                                if (contactSubgroups.length > 0) {
+                                  setSelectedSubgroups([...new Set([...selectedSubgroups, ...contactSubgroups])]);
+                                }
+                              }
+                            }
                           } else {
                             // Убираем из выбранных
                             setSelectedContacts(selectedContacts.filter(id => id !== contactId));
@@ -1594,6 +1620,46 @@ export function MailingsPage() {
                                 ...newMailing,
                                 exclude_contacts: [...newMailing.exclude_contacts, contactId],
                               });
+                            }
+
+                            // Проверяем, остались ли еще выбранные контакты в подгруппах этого контакта
+                            const { data: memberships } = await supabase
+                              .from("contact_group_members")
+                              .select("group_id")
+                              .eq("contact_id", contactId);
+
+                            if (memberships && memberships.length > 0) {
+                              const { data: subgroups } = await supabase
+                                .from("contact_groups")
+                                .select("id")
+                                .eq("parent_group_id", group.id);
+
+                              if (subgroups) {
+                                const subgroupIds = subgroups.map(s => s.id);
+                                const contactSubgroups = memberships
+                                  .map(m => m.group_id)
+                                  .filter(id => subgroupIds.includes(id));
+
+                                // Для каждой подгруппы контакта проверяем, остались ли в ней выбранные контакты
+                                for (const subgroupId of contactSubgroups) {
+                                  const { data: subgroupMembers } = await supabase
+                                    .from("contact_group_members")
+                                    .select("contact_id")
+                                    .eq("group_id", subgroupId);
+
+                                  if (subgroupMembers) {
+                                    const subgroupContactIds = subgroupMembers.map(m => m.contact_id);
+                                    // Если нет выбранных контактов в этой подгруппе - снимаем галочку с подгруппы
+                                    const hasSelectedContacts = subgroupContactIds.some(id =>
+                                      selectedContacts.filter(scId => scId !== contactId).includes(id)
+                                    );
+
+                                    if (!hasSelectedContacts) {
+                                      setSelectedSubgroups(selectedSubgroups.filter(id => id !== subgroupId));
+                                    }
+                                  }
+                                }
+                              }
                             }
                           }
                         }}
