@@ -383,7 +383,7 @@ export function MailingsPage() {
       if (sendingMailings && sendingMailings.length > 0) {
         loadMailings();
       }
-    }, 10000); // 2 секунды
+    }, 3000); // 2 секунды
 
     return () => {
       mailingsChannel.unsubscribe();
