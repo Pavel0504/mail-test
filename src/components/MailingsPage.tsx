@@ -363,7 +363,7 @@ export function MailingsPage() {
       )
       .subscribe();
 
-    // Умная проверка статусов рассылок каждые 5 секунд
+    // Умная проверка статусов рассылок каждые 2 секунды
     // Запускается только когда есть активные рассылки в статусе "sending"
     const checkInterval = setInterval(() => {
       // Проверяем, есть ли рассылки в статусе "sending"
@@ -375,7 +375,7 @@ export function MailingsPage() {
         // Если есть активные рассылки - обновляем данные
         loadMailings();
       }
-    }, 5000); // 5 секунд
+    }, 5000); // 2 секунды
 
     return () => {
       mailingsChannel.unsubscribe();
