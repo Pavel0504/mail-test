@@ -383,7 +383,7 @@ export function MailingsPage() {
       if (sendingMailings && sendingMailings.length > 0) {
         loadMailings();
       }
-    }, 2000); // 2 секунды
+    }, 10000); // 2 секунды
 
     return () => {
       mailingsChannel.unsubscribe();
@@ -1849,17 +1849,25 @@ export function MailingsPage() {
                   {selectedMailing.recipients?.map((recipient) => (
                     <div
                       key={recipient.id}
-                      className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 flex items-center justify-between"
+                      className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600"
                     >
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                          {recipient.contact?.email}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          Отправитель: {recipient.sender_email?.email}
-                        </p>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white">
+                            {recipient.contact?.email}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Отправитель: {recipient.sender_email?.email}
+                          </p>
+                        </div>
+                        {getStatusBadge(recipient.status)}
                       </div>
-                      {getStatusBadge(recipient.status)}
+                      {recipient.error_message && (
+                        <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-600 dark:text-red-400">
+                          <span className="font-medium">Ошибка: </span>
+                          {recipient.error_message}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
