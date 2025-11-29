@@ -319,10 +319,15 @@ export function MailingsPage() {
     Array<{
       contact_email: string;
       contact_name: string;
-      sent_at: string;
-      sender_email: string;
+      contact_id: string;
+      mailings: Array<{
+        sent_at: string;
+        sender_email: string;
+        subject: string;
+      }>;
     }>
   >([]);
+  const [expandedDuplicates, setExpandedDuplicates] = useState<Set<string>>(new Set());
 
   const [newMailing, setNewMailing] = useState({
     subject: "",
@@ -378,7 +383,7 @@ export function MailingsPage() {
       if (sendingMailings && sendingMailings.length > 0) {
         loadMailings();
       }
-    }, 5000); // 2 секунды
+    }, 2000); // 2 секунды
 
     return () => {
       mailingsChannel.unsubscribe();
@@ -506,8 +511,10 @@ export function MailingsPage() {
         id,
         contact_id,
         sent_at,
-        contact:contacts(email, name),
-        sender_email:emails(email)
+        mailing_id,
+        contact:contacts(id, email, name),
+        sender_email:emails(email),
+        mailing:mailings(subject)
       `
       )
       .in("contact_id", contactIds)
@@ -517,14 +524,41 @@ export function MailingsPage() {
       return [];
     }
 
-    const duplicates = existingRecipients.map((recipient: any) => ({
-      contact_email: recipient.contact?.email || "",
-      contact_name: recipient.contact?.name || "",
-      sent_at: recipient.sent_at || "",
-      sender_email: recipient.sender_email?.email || "",
-    }));
+    // Группируем рассылки по контактам
+    const contactMap = new Map<string, {
+      contact_email: string;
+      contact_name: string;
+      contact_id: string;
+      mailings: Array<{
+        sent_at: string;
+        sender_email: string;
+        subject: string;
+      }>;
+    }>();
 
-    return duplicates;
+    existingRecipients.forEach((recipient: any) => {
+      const contactId = recipient.contact_id;
+      const contactEmail = recipient.contact?.email || "";
+      const contactName = recipient.contact?.name || "";
+
+      if (!contactMap.has(contactId)) {
+        contactMap.set(contactId, {
+          contact_email: contactEmail,
+          contact_name: contactName,
+          contact_id: contactId,
+          mailings: [],
+        });
+      }
+
+      const contactData = contactMap.get(contactId)!;
+      contactData.mailings.push({
+        sent_at: recipient.sent_at || "",
+        sender_email: recipient.sender_email?.email || "",
+        subject: recipient.mailing?.subject || "Без темы",
+      });
+    });
+
+    return Array.from(contactMap.values());
   };
 
   const handleCreateMailing = async (e: React.FormEvent) => {
@@ -1887,50 +1921,81 @@ export function MailingsPage() {
             </div>
 
             <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Следующие контакты уже получали рассылки ранее:
+              Следующие контакты уже получали рассылки ранее. Раскройте каждый контакт, чтобы увидеть детали:
             </p>
 
-            <div className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                        Email
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                        Имя
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                        Дата отправки
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                        Отправитель
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {duplicateMailings.map((duplicate, index) => (
-                      <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                          {duplicate.contact_email}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                          {duplicate.contact_name || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                          {duplicate.sent_at
-                            ? new Date(duplicate.sent_at).toLocaleString("ru-RU")
-                            : "-"}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                          {duplicate.sender_email}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="mb-6 space-y-2 max-h-96 overflow-y-auto">
+              {duplicateMailings.map((duplicate) => {
+                const isExpanded = expandedDuplicates.has(duplicate.contact_id);
+                return (
+                  <div
+                    key={duplicate.contact_id}
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+                  >
+                    <button
+                      onClick={() => {
+                        const newExpanded = new Set(expandedDuplicates);
+                        if (isExpanded) {
+                          newExpanded.delete(duplicate.contact_id);
+                        } else {
+                          newExpanded.add(duplicate.contact_id);
+                        }
+                        setExpandedDuplicates(newExpanded);
+                      }}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <ChevronDown
+                          className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${
+                            isExpanded ? "" : "-rotate-90"
+                          }`}
+                        />
+                        <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        <div className="text-left">
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {duplicate.contact_email}
+                          </p>
+                          {duplicate.contact_name && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {duplicate.contact_name}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">
+                        Рассылок: {duplicate.mailings.length}
+                      </span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div className="p-4 space-y-2 max-h-60 overflow-y-auto">
+                          {duplicate.mailings.map((mailing, idx) => (
+                            <div
+                              key={idx}
+                              className="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-600"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
+                                    {mailing.subject}
+                                  </p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                                    Отправитель: {mailing.sender_email}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {new Date(mailing.sent_at).toLocaleString("ru-RU")}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div className="flex gap-3">
@@ -1938,33 +2003,19 @@ export function MailingsPage() {
                 onClick={() => {
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
-                  setShowCreateModal(false);
-                  setNewMailing({
-                    subject: "",
-                    text_content: "",
-                    html_content: "",
-                    scheduled_at: "",
-                    scheduled_time: "",
-                    timezone: "UTC",
-                    selected_contacts: [],
-                    selected_groups: [],
-                    exclude_contacts: [],
-                    send_now: false,
-                    subgroup_email_overrides: {},
-                  });
-                  setSelectedSubgroups([]);
-                  setSelectedContacts([]);
-                  setExpandedSubgroups(new Set());
-                  setExpandedGroups(new Set());
+                  setExpandedDuplicates(new Set());
+                  setShowCreateModal(true);
                 }}
-                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
               >
-                Отменить рассылку
+                <Edit2 className="w-5 h-5" />
+                Редактировать рассылку
               </button>
               <button
                 onClick={async () => {
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
+                  setExpandedDuplicates(new Set());
                   await proceedWithMailingCreation();
                 }}
                 disabled={loading}
