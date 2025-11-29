@@ -420,6 +420,35 @@ export function MailingsPage() {
         // Supabase вернёт ключ "mailing_recipients", приводим к mailing.recipients
         recipients: m.mailing_recipients ?? [],
       }));
+
+      // Проверяем и обновляем статусы рассылок, которые в статусе "sending"
+      for (const mailing of normalized) {
+        if (mailing.status === "sending") {
+          const totalRecipients = mailing.recipients?.length || 0;
+          const processedCount = mailing.success_count + mailing.failed_count;
+
+          // Если все получатели обработаны (sent_count равен количеству получателей)
+          // И сумма success + failed совпадает с sent_count
+          if (
+            mailing.sent_count >= totalRecipients &&
+            processedCount >= totalRecipients &&
+            totalRecipients > 0
+          ) {
+            // Определяем финальный статус
+            const finalStatus = mailing.success_count > 0 ? "completed" : "failed";
+
+            // Обновляем статус в базе данных
+            await supabase
+              .from("mailings")
+              .update({ status: finalStatus })
+              .eq("id", mailing.id);
+
+            // Обновляем локально
+            mailing.status = finalStatus;
+          }
+        }
+      }
+
       setMailings(normalized);
     }
   };
