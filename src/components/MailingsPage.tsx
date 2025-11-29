@@ -368,22 +368,10 @@ export function MailingsPage() {
       )
       .subscribe();
 
-    // Умная проверка статусов рассылок каждые 2 секунды
-    // Запускается только когда есть активные рассылки в статусе "sending"
-    const checkInterval = setInterval(async () => {
-      // Проверяем напрямую в базе, есть ли рассылки в статусе "sending"
-      const { data: sendingMailings } = await supabase
-        .from("mailings")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("status", "sending")
-        .limit(1);
-
-      // Только если есть активные рассылки - загружаем данные
-      if (sendingMailings && sendingMailings.length > 0) {
-        loadMailings();
-      }
-    }, 3000); // 2 секунды
+    // Регулярная проверка и обновление статусов рассылок
+    const checkInterval = setInterval(() => {
+      loadMailings();
+    }, 2000); // 2 секунды
 
     return () => {
       mailingsChannel.unsubscribe();
