@@ -1346,7 +1346,13 @@ export function MailingsPage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="font-semibold text-gray-900 dark:text-white">
-                            {mailing.subject || "Без темы"}
+                            Рассылка {new Date(mailing.created_at).toLocaleString("ru-RU", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
                           </h3>
                           {getStatusBadge(mailing.status)}
                           {hasPartialErrors(mailing) && (
@@ -1826,15 +1832,6 @@ export function MailingsPage() {
             <div className="space-y-6">
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Тема
-                </label>
-                <p className="text-gray-900 dark:text-white mt-1">
-                  {selectedMailing.subject || "Без темы"}
-                </p>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Статус
                 </label>
                 <div className="mt-1">
@@ -1868,32 +1865,6 @@ export function MailingsPage() {
                   </p>
                 </div>
               </div>
-
-              {selectedMailing.text_content && (
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                    Текст письма
-                  </label>
-                  <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 max-h-64 overflow-y-auto">
-                    <pre className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap font-mono">
-                      {selectedMailing.text_content}
-                    </pre>
-                  </div>
-                </div>
-              )}
-
-              {selectedMailing.html_content && (
-                <div>
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                    HTML письма
-                  </label>
-                  <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 max-h-64 overflow-y-auto">
-                    <pre className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap font-mono">
-                      {selectedMailing.html_content}
-                    </pre>
-                  </div>
-                </div>
-              )}
 
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
@@ -1938,8 +1909,8 @@ export function MailingsPage() {
               Удалить рассылку?
             </h2>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Вы уверены, что хотите удалить рассылку{" "}
-              <strong>{mailingToDelete.subject}</strong>? Это действие нельзя
+              Вы уверены, что хотите удалить рассылку от{" "}
+              <strong>{new Date(mailingToDelete.created_at).toLocaleString("ru-RU")}</strong>? Это действие нельзя
               отменить.
             </p>
             <div className="flex gap-3">
