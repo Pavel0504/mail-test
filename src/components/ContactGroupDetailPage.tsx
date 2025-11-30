@@ -23,6 +23,7 @@ interface DuplicateContact {
   email: string;
   contactId: string;
   existingGroups: Array<{ groupId: string; groupName: string }>;
+  newContactData?: { name: string; link: string; default_sender_email_id: string };
 }
 
 export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: ContactGroupDetailPageProps) {
@@ -155,7 +156,7 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     }
   };
 
-  const checkForDuplicates = async (contactsToAdd: Array<{ email: string }>) => {
+  const checkForDuplicates = async (contactsToAdd: Array<{ email: string; name: string; link: string; default_sender_email_id: string }>) => {
     if (!user) return [];
 
     const foundDuplicates: DuplicateContact[] = [];
@@ -187,6 +188,7 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
               email: contact.email,
               contactId,
               existingGroups: groups.map((g) => ({ groupId: g.id, groupName: g.name })),
+              newContactData: { name: contact.name, link: contact.link, default_sender_email_id: contact.default_sender_email_id },
             });
           }
         }
@@ -201,18 +203,35 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
 
     try {
       if (action === 'keep') {
-        const { data: existingMember } = await supabase
-          .from('contact_group_members')
-          .select('id')
-          .eq('group_id', groupId)
-          .eq('contact_id', duplicate.contactId)
-          .maybeSingle();
+        // Создаем новый уникальный контакт с данными, которые пользователь указал
+        if (duplicate.newContactData) {
+          const { data: newContact } = await supabase
+            .from('contacts')
+            .insert({
+              email: duplicate.email,
+              name: duplicate.newContactData.name,
+              link: duplicate.newContactData.link,
+              owner_id: user.id,
+              default_sender_email_id: duplicate.newContactData.default_sender_email_id || null,
+              has_changes: false,
+            })
+            .select()
+            .single();
 
-        if (!existingMember) {
-          await supabase.from('contact_group_members').insert({
-            group_id: groupId,
-            contact_id: duplicate.contactId,
-          });
+          if (newContact) {
+            await supabase.from('contact_group_members').insert({
+              group_id: groupId,
+              contact_id: newContact.id,
+            });
+
+            await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              action_type: 'create',
+              entity_type: 'contact',
+              entity_id: newContact.id,
+              details: { email: duplicate.email, group_id: groupId },
+            });
+          }
         }
       } else if (action === 'move') {
         for (const existingGroup of duplicate.existingGroups) {
@@ -228,6 +247,7 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
           contact_id: duplicate.contactId,
         });
       } else if (action === 'duplicate') {
+        // Создаем копию существующего контакта со всеми его данными
         const { data: originalContact } = await supabase
           .from('contacts')
           .select('*')
@@ -252,6 +272,14 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
             await supabase.from('contact_group_members').insert({
               group_id: groupId,
               contact_id: newContact.id,
+            });
+
+            await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              action_type: 'create',
+              entity_type: 'contact',
+              entity_id: newContact.id,
+              details: { email: duplicate.email, group_id: groupId, duplicated_from: duplicate.contactId },
             });
           }
         }
