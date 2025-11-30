@@ -285,10 +285,13 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
         }
       }
 
-      setDuplicates(duplicates.filter((d) => d.email !== duplicate.email));
+      const remainingDuplicates = duplicates.filter((d) => d.email !== duplicate.email);
+      setDuplicates(remainingDuplicates);
 
-      if (duplicates.length <= 1) {
+      if (remainingDuplicates.length === 0) {
         setShowDuplicatesModal(false);
+        setShowAddModal(false);
+        setNewContacts([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
       }
 
       loadGroupData();
