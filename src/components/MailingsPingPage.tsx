@@ -394,7 +394,7 @@ export function MailingsPingPage() {
                   type="number"
                   min="1"
                   value={settingsForm.wait_time_hours}
-                  onChange={(e) => setSettingsForm({ ...settingsForm, wait_time_hours: parseInt(e.target.value) || 1 })}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, wait_time_hours: parseInt(e.target.value) || 0.1 })}
                   className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
                   required
                 />
