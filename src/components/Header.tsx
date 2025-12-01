@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell } from 'lucide-react';
+import { Bell, CheckCircle, XCircle } from 'lucide-react';
 import { supabase, Notification } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -96,6 +96,102 @@ export function Header() {
     loadNotifications();
   };
 
+  const handleApproveShare = async (notification: Notification) => {
+    if (!user || notification.type !== 'contact_share_request') return;
+
+    const { contact_id, requester_id } = notification.data as { contact_id: string; requester_id: string };
+
+    // Получаем данные оригинального контакта
+    const { data: originalContact } = await supabase
+      .from('contacts')
+      .select('*')
+      .eq('id', contact_id)
+      .single();
+
+    if (originalContact) {
+      // Создаем новый контакт для запросившего пользователя
+      const { data: newContact } = await supabase
+        .from('contacts')
+        .insert({
+          email: originalContact.email,
+          name: originalContact.name,
+          link: originalContact.link,
+          owner_id: requester_id,
+          has_changes: false,
+        })
+        .select()
+        .single();
+
+      if (newContact) {
+        // Добавляем запись в историю контакта
+        await supabase.from('contact_history').insert({
+          contact_id: newContact.id,
+          action_type: 'create',
+          changed_fields: {
+            email: originalContact.email,
+            name: originalContact.name,
+            link: originalContact.link,
+            shared_from: user.id,
+          },
+          changed_by: requester_id,
+        });
+
+        // Обновляем статус запроса на одобрено
+        await supabase
+          .from('contact_shares')
+          .update({ status: 'approved' })
+          .eq('contact_id', contact_id)
+          .eq('requester_id', requester_id);
+
+        // Отправляем уведомление запросившему пользователю
+        await supabase.from('notifications').insert({
+          user_id: requester_id,
+          type: 'contact_share_approved',
+          message: `Ваш запрос на доступ к контакту ${originalContact.email} одобрен`,
+          data: { contact_id: newContact.id },
+          read: false,
+        });
+
+        // Помечаем текущее уведомление как прочитанное
+        await markAsRead(notification.id);
+      }
+    }
+  };
+
+  const handleRejectShare = async (notification: Notification) => {
+    if (!user || notification.type !== 'contact_share_request') return;
+
+    const { contact_id, requester_id } = notification.data as { contact_id: string; requester_id: string };
+
+    // Получаем email контакта для уведомления
+    const { data: contact } = await supabase
+      .from('contacts')
+      .select('email')
+      .eq('id', contact_id)
+      .single();
+
+    if (contact) {
+      // Удаляем запрос на доступ
+      await supabase
+        .from('contact_shares')
+        .delete()
+        .eq('contact_id', contact_id)
+        .eq('requester_id', requester_id);
+
+      // Отправляем уведомление запросившему пользователю
+      await supabase.from('notifications').insert({
+        user_id: requester_id,
+        type: 'contact_share_rejected',
+        message: `Ваш запрос на доступ к контакту ${contact.email} отклонен`,
+        data: { contact_id },
+        read: false,
+      });
+
+      // Помечаем текущее уведомление как прочитанное
+      await markAsRead(notification.id);
+    }
+  };
+
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat('ru-RU', {
       hour: '2-digit',
@@ -176,8 +272,7 @@ export function Header() {
                 notifications.map((notification) => (
                   <div
                     key={notification.id}
-                    onClick={() => !notification.read && markAsRead(notification.id)}
-                    className={`p-4 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${
+                    className={`p-4 border-b border-gray-100 dark:border-gray-700 transition-colors ${
                       !notification.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                     }`}
                   >
@@ -185,6 +280,38 @@ export function Header() {
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       {new Date(notification.created_at).toLocaleString('ru-RU')}
                     </p>
+                    {notification.type === 'contact_share_request' && !notification.read && (
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleApproveShare(notification);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-xs font-medium"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Подтвердить
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRejectShare(notification);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-xs font-medium"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          Отклонить
+                        </button>
+                      </div>
+                    )}
+                    {notification.type !== 'contact_share_request' && !notification.read && (
+                      <div
+                        onClick={() => markAsRead(notification.id)}
+                        className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      >
+                        Отметить как прочитанное
+                      </div>
+                    )}
                   </div>
                 ))
               )}

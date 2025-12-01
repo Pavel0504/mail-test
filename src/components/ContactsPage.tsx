@@ -25,6 +25,15 @@ interface ContactShare {
   status: string;
   created_at: string;
   requester?: { login: string };
+  owner?: { login: string };
+}
+
+interface PendingContactRequest {
+  id: string;
+  contact_email: string;
+  owner_login: string;
+  status: string;
+  created_at: string;
 }
 
 export function ContactsPage() {
@@ -42,6 +51,7 @@ export function ContactsPage() {
   const [contactHistory, setContactHistory] = useState<ContactHistory[]>([]);
   const [contactVersions, setContactVersions] = useState<ContactVersion[]>([]);
   const [pendingShares, setPendingShares] = useState<ContactShare[]>([]);
+  const [myPendingRequests, setMyPendingRequests] = useState<PendingContactRequest[]>([]);
 
   const [newContacts, setNewContacts] = useState([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
   const [editForm, setEditForm] = useState({ email: '', name: '', link: '', default_sender_email_id: '' });
@@ -51,6 +61,7 @@ export function ContactsPage() {
       loadContacts();
       loadEmails();
       loadPendingShares();
+      loadMyPendingRequests();
     }
   }, [user]);
 
@@ -93,6 +104,26 @@ export function ContactsPage() {
 
     if (data) {
       setPendingShares(data);
+    }
+  };
+
+  const loadMyPendingRequests = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('contact_shares')
+      .select('*, contact:contacts(email), owner:users!contact_shares_owner_id_fkey(login)')
+      .eq('requester_id', user.id)
+      .eq('status', 'pending');
+
+    if (data) {
+      const requests = data.map((share: any) => ({
+        id: share.id,
+        contact_email: share.contact?.email || '',
+        owner_login: share.owner?.login || 'Неизвестно',
+        status: share.status,
+        created_at: share.created_at,
+      }));
+      setMyPendingRequests(requests);
     }
   };
 
@@ -154,21 +185,30 @@ export function ContactsPage() {
         }
 
         if (otherContact) {
-          const { error: shareError } = await supabase.from('contact_shares').insert({
-            contact_id: otherContact.id,
-            requester_id: user.id,
-            owner_id: otherContact.owner_id,
-            status: 'pending',
-          });
+          const { data: existingShare } = await supabase
+            .from('contact_shares')
+            .select('id')
+            .eq('contact_id', otherContact.id)
+            .eq('requester_id', user.id)
+            .maybeSingle();
 
-          if (!shareError) {
-            await supabase.from('notifications').insert({
-              user_id: otherContact.owner_id,
-              type: 'contact_share_request',
-              message: `Пользователь ${user.login} запросил доступ к контакту ${contact.email}`,
-              data: { contact_id: otherContact.id, requester_id: user.id },
-              read: false,
+          if (!existingShare) {
+            const { error: shareError } = await supabase.from('contact_shares').insert({
+              contact_id: otherContact.id,
+              requester_id: user.id,
+              owner_id: otherContact.owner_id,
+              status: 'pending',
             });
+
+            if (!shareError) {
+              await supabase.from('notifications').insert({
+                user_id: otherContact.owner_id,
+                type: 'contact_share_request',
+                message: `Пользователь ${user.login} запросил доступ к контакту ${contact.email}`,
+                data: { contact_id: otherContact.id, requester_id: user.id, share_id: '' },
+                read: false,
+              });
+            }
           }
         } else {
           const { data: newContact, error: insertError } = await supabase.from('contacts').insert({
@@ -206,6 +246,7 @@ export function ContactsPage() {
       setNewContacts([{ email: '', name: '', link: '', default_sender_email_id: '' }]);
       setShowAddModal(false);
       loadContacts();
+      loadMyPendingRequests();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка при добавлении контактов');
     } finally {
@@ -374,6 +415,8 @@ export function ContactsPage() {
       }
 
       loadPendingShares();
+      loadContacts();
+      loadMyPendingRequests();
     } catch (err) {
       console.error('Error handling share response:', err);
     } finally {
@@ -415,6 +458,36 @@ export function ContactsPage() {
           Добавить контакты
         </button>
       </div>
+
+      {myPendingRequests.length > 0 && (
+        <div className="mb-6 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl p-4">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            Ожидают подтверждения
+          </h3>
+          <div className="space-y-2">
+            {myPendingRequests.map((request) => (
+              <div key={request.id} className="flex items-center justify-between bg-white dark:bg-gray-700 p-3 rounded-lg opacity-60">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {request.contact_email}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Ожидается разрешение от {request.owner_login}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                    {new Date(request.created_at).toLocaleString('ru-RU')}
+                  </p>
+                </div>
+                <div className="px-3 py-1.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 rounded-lg text-xs font-medium flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  Неактивный
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {pendingShares.length > 0 && (
         <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4">
