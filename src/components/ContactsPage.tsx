@@ -143,7 +143,7 @@ export function ContactsPage() {
 
         const { data: existingContacts } = await supabase
           .from('contacts')
-          .select('*, owner:users!contacts_owner_id_fkey(login)')
+          .select('id, email, owner_id, owner:users!contacts_owner_id_fkey(login)')
           .eq('email', contact.email);
 
         const myContact = existingContacts?.find(c => c.owner_id === user.id);
