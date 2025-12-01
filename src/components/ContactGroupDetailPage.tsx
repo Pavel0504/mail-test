@@ -162,14 +162,15 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     const foundDuplicates: DuplicateContact[] = [];
 
     for (const contact of contactsToAdd) {
-      const { data: existingContacts } = await supabase
+      // Сначала проверяем дубли у текущего пользователя
+      const { data: myContacts } = await supabase
         .from('contacts')
         .select('id, email')
         .eq('email', contact.email)
         .eq('owner_id', user.id);
 
-      if (existingContacts && existingContacts.length > 0) {
-        const contactId = existingContacts[0].id;
+      if (myContacts && myContacts.length > 0) {
+        const contactId = myContacts[0].id;
 
         const { data: memberships } = await supabase
           .from('contact_group_members')
@@ -308,6 +309,7 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
     setError('');
 
     try {
+      // Сначала проверяем дубли у текущего пользователя
       const foundDuplicates = await checkForDuplicates(newContacts);
 
       if (foundDuplicates.length > 0) {
@@ -317,37 +319,91 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
         return;
       }
 
+      // Затем проверяем у других пользователей и либо создаем контакт, либо запрашиваем шаринг
       for (const contact of newContacts) {
         if (!contact.email) continue;
 
-        const { data: newContact, error: insertError } = await supabase
+        // Проверяем есть ли контакт у других пользователей
+        const { data: otherUsersContacts } = await supabase
           .from('contacts')
-          .insert({
-            email: contact.email,
-            name: contact.name,
-            link: contact.link,
-            owner_id: user.id,
-            default_sender_email_id: contact.default_sender_email_id || null,
-            has_changes: false,
-          })
-          .select()
-          .single();
+          .select('id, owner_id, email')
+          .eq('email', contact.email)
+          .neq('owner_id', user.id);
 
-        if (insertError) throw insertError;
+        // Если контакт найден у другого пользователя - отправляем запрос на шаринг
+        if (otherUsersContacts && otherUsersContacts.length > 0) {
+          const originalContact = otherUsersContacts[0];
 
-        if (newContact) {
-          await supabase.from('contact_group_members').insert({
-            group_id: groupId,
-            contact_id: newContact.id,
-          });
+          // Проверяем, нет ли уже активного запроса на шаринг
+          const { data: existingShareRequest } = await supabase
+            .from('contact_shares')
+            .select('id')
+            .eq('contact_id', originalContact.id)
+            .eq('requester_id', user.id)
+            .maybeSingle();
 
-          await supabase.from('activity_logs').insert({
-            user_id: user.id,
-            action_type: 'create',
-            entity_type: 'contact',
-            entity_id: newContact.id,
-            details: { email: contact.email, group_id: groupId },
-          });
+          if (!existingShareRequest) {
+            // Создаем запрос на шаринг
+            await supabase.from('contact_shares').insert({
+              contact_id: originalContact.id,
+              requester_id: user.id,
+              owner_id: originalContact.owner_id,
+              status: 'pending',
+            });
+
+            // Отправляем уведомление владельцу
+            await supabase.from('notifications').insert({
+              user_id: originalContact.owner_id,
+              type: 'contact_share_request',
+              message: `Пользователь ${user.login} запросил доступ к контакту ${contact.email}`,
+              data: { contact_id: originalContact.id, requester_id: user.id },
+              read: false,
+            });
+
+            console.log(`Отправлен запрос на шаринг контакта ${contact.email}`);
+          }
+        } else {
+          // Контакта нет ни у кого - создаем новый
+          const { data: newContact, error: insertError } = await supabase
+            .from('contacts')
+            .insert({
+              email: contact.email,
+              name: contact.name,
+              link: contact.link,
+              owner_id: user.id,
+              default_sender_email_id: contact.default_sender_email_id || null,
+              has_changes: false,
+            })
+            .select()
+            .single();
+
+          if (insertError) throw insertError;
+
+          if (newContact) {
+            await supabase.from('contact_group_members').insert({
+              group_id: groupId,
+              contact_id: newContact.id,
+            });
+
+            await supabase.from('contact_history').insert({
+              contact_id: newContact.id,
+              action_type: 'create',
+              changed_fields: {
+                email: contact.email,
+                name: contact.name,
+                link: contact.link,
+              },
+              changed_by: user.id,
+            });
+
+            await supabase.from('activity_logs').insert({
+              user_id: user.id,
+              action_type: 'create',
+              entity_type: 'contact',
+              entity_id: newContact.id,
+              details: { email: contact.email, group_id: groupId },
+            });
+          }
         }
       }
 
@@ -825,7 +881,7 @@ export function ContactGroupDetailPage({ groupId, onBack, onOpenSubgroup }: Cont
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {!group.parent_group_id && (
           <div>
             <div className="flex items-center justify-between mb-4">
