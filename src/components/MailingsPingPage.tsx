@@ -388,24 +388,26 @@ export function MailingsPingPage() {
 
 <div>
   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-    Время ожидания ответа (часы)
+    Время ожидания ответа (минуты)
   </label>
   <input
     type="number"
-    min="0.1"
-    step="0.1"
-    value={settingsForm.wait_time_hours}
-    onChange={(e) =>
+    min="1"
+    step="1"
+    value={settingsForm.wait_time_minutes ?? Math.round(settingsForm.wait_time_hours * 60)}
+    onChange={(e) => {
+      const minutes = parseInt(e.target.value) || 0;
       setSettingsForm({
         ...settingsForm,
-        wait_time_hours: parseFloat(e.target.value) || 0
-      })
-    }
+        wait_time_minutes: minutes,
+        wait_time_hours: minutes / 60, // автоматический пересчет в часы
+      });
+    }}
     className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-gray-900 dark:text-white"
     required
   />
   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-    Через сколько часов отправлять пинг-письмо, если нет ответа
+    Через сколько минут отправлять пинг-письмо, если нет ответа
   </p>
 </div>
 
