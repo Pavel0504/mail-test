@@ -89,7 +89,7 @@ export function MailingsPingPage() {
       if (settingsForm.check_interval_minutes < 1) {
         throw new Error('Интервал проверки должен быть больше 0 минут');
       }
-      if (settingsForm.wait_time_hours < 1) {
+      if (settingsForm.wait_time_hours < 0) {
         throw new Error('Время ожидания должно быть больше 0 часов');
       }
 
