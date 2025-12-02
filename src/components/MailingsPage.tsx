@@ -2069,18 +2069,23 @@ export function MailingsPage() {
                 onClick={async () => {
                   const excludedContactIds = Array.from(selectedDuplicatesToExclude);
 
+                  // Обновляем список исключений и сразу передаем в создание
+                  const updatedExcludeContacts = [
+                    ...newMailing.exclude_contacts,
+                    ...excludedContactIds,
+                  ];
+
                   setNewMailing({
                     ...newMailing,
-                    exclude_contacts: [
-                      ...newMailing.exclude_contacts,
-                      ...excludedContactIds,
-                    ],
+                    exclude_contacts: updatedExcludeContacts,
                   });
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
                   setExpandedDuplicates(new Set());
                   setSelectedDuplicatesToExclude(new Set());
-                  await proceedWithMailingCreation();
+
+                  // Передаем обновленный список исключений напрямую
+                  await proceedWithMailingCreation(updatedExcludeContacts);
                 }}
                 disabled={loading}
                 className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
