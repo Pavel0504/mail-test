@@ -640,7 +640,7 @@ export function MailingsPage() {
     }
   };
 
-  const proceedWithMailingCreation = async () => {
+  const proceedWithMailingCreation = async (excludeContactsOverride?: string[]) => {
     if (!user) return;
 
     setLoading(true);
@@ -699,9 +699,12 @@ export function MailingsPage() {
       // Убираем дубликаты
       allContactIds = [...new Set(allContactIds)];
 
+      // Используем переданный список исключений или список из состояния
+      const excludeList = excludeContactsOverride || newMailing.exclude_contacts;
+
       // Убираем исключенные контакты
       const finalContacts = allContactIds.filter(
-        (id) => !newMailing.exclude_contacts.includes(id)
+        (id) => !excludeList.includes(id)
       );
 
       // Определяем подгруппы для каждого контакта и собираем уникальные подгруппы
