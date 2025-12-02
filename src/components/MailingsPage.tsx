@@ -2067,9 +2067,7 @@ export function MailingsPage() {
               </button>
               <button
                 onClick={async () => {
-                  // Убираем выделенные контакты из selectedContacts
                   const excludedContactIds = Array.from(selectedDuplicatesToExclude);
-                  setSelectedContacts(selectedContacts.filter(id => !excludedContactIds.includes(id)));
 
                   setNewMailing({
                     ...newMailing,
