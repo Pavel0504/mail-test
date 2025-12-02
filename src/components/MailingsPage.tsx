@@ -328,7 +328,7 @@ export function MailingsPage() {
     }>
   >([]);
   const [expandedDuplicates, setExpandedDuplicates] = useState<Set<string>>(new Set());
-  const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(new Set());
+  const [selectedDuplicatesToExclude, setSelectedDuplicatesToExclude] = useState<Set<string>>(new Set());
 
   const [newMailing, setNewMailing] = useState({
     subject: "",
@@ -625,7 +625,6 @@ export function MailingsPage() {
 
       if (duplicates.length > 0) {
         setDuplicateMailings(duplicates);
-        setSelectedDuplicates(new Set(duplicates.map(d => d.contact_id)));
         setShowDuplicatesModal(true);
         setLoading(false);
         return;
@@ -660,11 +659,6 @@ export function MailingsPage() {
 
       // Собираем контакты для определения их подгрупп
       let allContactIds: string[] = [];
-      const excludedDuplicates = new Set(
-        duplicateMailings
-          .filter(d => !selectedDuplicates.has(d.contact_id))
-          .map(d => d.contact_id)
-      );
 
       // Если выбраны группы - собираем контакты из всех подгрупп
       for (const groupId of newMailing.selected_groups) {
@@ -705,9 +699,9 @@ export function MailingsPage() {
       // Убираем дубликаты
       allContactIds = [...new Set(allContactIds)];
 
-      // Убираем исключенные контакты и неотмеченные дубли
+      // Убираем исключенные контакты
       const finalContacts = allContactIds.filter(
-        (id) => !newMailing.exclude_contacts.includes(id) && !excludedDuplicates.has(id)
+        (id) => !newMailing.exclude_contacts.includes(id)
       );
 
       // Определяем подгруппы для каждого контакта и собираем уникальные подгруппы
@@ -1946,32 +1940,13 @@ export function MailingsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-4xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-bold text-red-600 dark:text-red-400">
-                  На данные контакты рассылка уже производилась
-                </h2>
-                <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedDuplicates.size === duplicateMailings.length && duplicateMailings.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedDuplicates(new Set(duplicateMailings.map(d => d.contact_id)));
-                      } else {
-                        setSelectedDuplicates(new Set());
-                      }
-                    }}
-                    className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                  />
-                  Рассылок: {duplicateMailings.length}
-                </label>
-              </div>
+              <h2 className="text-xl font-bold text-red-600 dark:text-red-400">
+                На данные контакты рассылка уже производилась
+              </h2>
               <button
                 onClick={() => {
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
-                  setSelectedDuplicates(new Set());
-                  setExpandedDuplicates(new Set());
                 }}
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
               >
@@ -1986,26 +1961,30 @@ export function MailingsPage() {
             <div className="mb-6 space-y-2 max-h-96 overflow-y-auto">
               {duplicateMailings.map((duplicate) => {
                 const isExpanded = expandedDuplicates.has(duplicate.contact_id);
+                const isExcluded = selectedDuplicatesToExclude.has(duplicate.contact_id);
                 return (
                   <div
                     key={duplicate.contact_id}
-                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+                    className={`border rounded-lg overflow-hidden transition-colors ${
+                      isExcluded
+                        ? "border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20"
+                        : "border-gray-200 dark:border-gray-700"
+                    }`}
                   >
-                    <div className="p-4 bg-gray-50 dark:bg-gray-700/50 flex items-center gap-3">
+                    <div className="w-full p-4 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between gap-3">
                       <input
                         type="checkbox"
-                        checked={selectedDuplicates.has(duplicate.contact_id)}
+                        checked={isExcluded}
                         onChange={(e) => {
-                          const newSelected = new Set(selectedDuplicates);
+                          const newExcluded = new Set(selectedDuplicatesToExclude);
                           if (e.target.checked) {
-                            newSelected.add(duplicate.contact_id);
+                            newExcluded.add(duplicate.contact_id);
                           } else {
-                            newSelected.delete(duplicate.contact_id);
+                            newExcluded.delete(duplicate.contact_id);
                           }
-                          setSelectedDuplicates(newSelected);
+                          setSelectedDuplicatesToExclude(newExcluded);
                         }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 flex-shrink-0"
+                        className="w-4 h-4 text-orange-600 rounded focus:ring-2 focus:ring-orange-500 flex-shrink-0"
                       />
                       <button
                         onClick={() => {
@@ -2017,16 +1996,15 @@ export function MailingsPage() {
                           }
                           setExpandedDuplicates(newExpanded);
                         }}
-                        className="flex-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between py-2 px-2 rounded"
+                        className="flex items-center gap-3 flex-1 text-left"
                       >
-                        <div className="flex items-center gap-3 flex-1">
                         <ChevronDown
-                          className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${
+                          className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform flex-shrink-0 ${
                             isExpanded ? "" : "-rotate-90"
                           }`}
                         />
-                        <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                        <div className="text-left">
+                        <Users className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                        <div>
                           <p className="font-medium text-gray-900 dark:text-white">
                             {duplicate.contact_email}
                           </p>
@@ -2036,11 +2014,10 @@ export function MailingsPage() {
                             </p>
                           )}
                         </div>
-                        </div>
-                        <span className="text-sm text-gray-600 dark:text-gray-400">
-                          Рассылок: {duplicate.mailings.length}
-                        </span>
                       </button>
+                      <span className="text-sm text-gray-600 dark:text-gray-400 flex-shrink-0">
+                        Рассылок: {duplicate.mailings.length}
+                      </span>
                     </div>
 
                     {isExpanded && (
@@ -2079,8 +2056,8 @@ export function MailingsPage() {
                 onClick={() => {
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
-                  setSelectedDuplicates(new Set());
                   setExpandedDuplicates(new Set());
+                  setSelectedDuplicatesToExclude(new Set());
                   setShowCreateModal(true);
                 }}
                 className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
@@ -2090,15 +2067,23 @@ export function MailingsPage() {
               </button>
               <button
                 onClick={async () => {
+                  setNewMailing({
+                    ...newMailing,
+                    exclude_contacts: [
+                      ...newMailing.exclude_contacts,
+                      ...Array.from(selectedDuplicatesToExclude),
+                    ],
+                  });
                   setShowDuplicatesModal(false);
                   setDuplicateMailings([]);
                   setExpandedDuplicates(new Set());
+                  setSelectedDuplicatesToExclude(new Set());
                   await proceedWithMailingCreation();
                 }}
-                disabled={loading || selectedDuplicates.size === 0}
+                disabled={loading}
                 className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
               >
-                {loading ? "Создание..." : `Продолжить с выбранными (${selectedDuplicates.size})`}
+                {loading ? "Создание..." : "Продолжить без выделенных"}
               </button>
             </div>
           </div>
